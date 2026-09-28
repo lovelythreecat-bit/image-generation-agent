@@ -1,0 +1,12 @@
+.venv/
+.venv-wheel/
+.python/
+.uv-cache/
+.superpowers/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+.env
+out/

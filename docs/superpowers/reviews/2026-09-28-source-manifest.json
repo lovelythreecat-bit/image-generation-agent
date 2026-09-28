@@ -1,0 +1,56 @@
+﻿{
+    "captured_date":  "2026-09-28",
+    "source_root":  "F:/Work/电商/mediaforge",
+    "source_head":  "777ad233b1ebfc1040090518a10ef6ea74d443fd",
+    "note":  "Hashes identify working-tree files read during evaluation, not a claim that the entire source checkout is clean.",
+    "files":  [
+                  {
+                      "path":  "docs/superpowers/specs/2026-09-28-standalone-image-agent-design.md",
+                      "sha256":  "3213e67e45264301f7eb0032175868f3bfe965d44146e706e881eec7fd5fb10b"
+                  },
+                  {
+                      "path":  "mediaforge/workers/platform_rules.py",
+                      "sha256":  "b0e7844ddb54907200be4c1cc2914c037e590fb65001144fb765c7a413a3cf0f"
+                  },
+                  {
+                      "path":  "mediaforge/workers/compliance/checker.py",
+                      "sha256":  "0de3fbed08fda5ee102ba99e8ae9088481c2a02b9e72d196355f26ebe5d73124"
+                  },
+                  {
+                      "path":  "mediaforge/workers/image/base.py",
+                      "sha256":  "6e7ef87d661ccc7710288fd85278d1a0bac029a1a8db7da0c8a5283629c186b1"
+                  },
+                  {
+                      "path":  "mediaforge/workers/image/main_image.py",
+                      "sha256":  "38a6c4d814043299d66ecde6b549ce90a8754d061bb64b653d9e5daebe68f95f"
+                  },
+                  {
+                      "path":  "mediaforge/workers/image/detail_page.py",
+                      "sha256":  "e5fc690e7bc42ce025bde197d92c57583f79a01bb658c515da050ee14a3ad765"
+                  },
+                  {
+                      "path":  "mediaforge/workers/image/pinduoduo_white_background.py",
+                      "sha256":  "41cd3df95397130093c6eb86967fa0c3711e37fba68257b728a085aea83d6057"
+                  },
+                  {
+                      "path":  "mediaforge/workers/openrouter_client.py",
+                      "sha256":  "83d9b778cdedc4d94d79669a00d30a72916b6025a71bf1a15a12aaf9213a956c"
+                  },
+                  {
+                      "path":  "mediaforge/orchestrator/nodes.py",
+                      "sha256":  "2fc8daa972a705b638b94896893cf037b11ddc4a2ff5259aaccd904b1fa6dc94"
+                  },
+                  {
+                      "path":  "tests/test_image_workers.py",
+                      "sha256":  "c2149502594c03e253e8ae5a07a909ca7de888d61eafbdcc9012e84a03f032cb"
+                  },
+                  {
+                      "path":  "tests/test_openrouter_client.py",
+                      "sha256":  "4699f4ac4690af1aae01578ea202f24bb9e0e010fd307d6edf6038feccee3c33"
+                  },
+                  {
+                      "path":  "LICENSE",
+                      "sha256":  "6cd0b777919e95a870b1f04caeef13c20cb2eed53753e82f5756ef60cb29ea0e"
+                  }
+              ]
+}
