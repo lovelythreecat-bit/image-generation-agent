@@ -1,0 +1,1712 @@
+{
+  "$defs": {
+    "AssetDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "output_type": {
+          "title": "Output Type",
+          "type": "string"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "blob_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blob Id"
+        },
+        "mime_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mime Type"
+        },
+        "byte_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Byte Length"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "generation_mode": {
+          "enum": [
+            "standard",
+            "strict",
+            "staged"
+          ],
+          "title": "Generation Mode",
+          "type": "string"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "error_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "element_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetElementPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "element_checks": {
+          "items": {
+            "$ref": "#/$defs/ElementCheck"
+          },
+          "title": "Element Checks",
+          "type": "array"
+        },
+        "reference_bindings": {
+          "items": {
+            "$ref": "#/$defs/ReferenceBinding"
+          },
+          "title": "Reference Bindings",
+          "type": "array"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/GenerationAttempt"
+          },
+          "title": "Attempts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "asset_id",
+        "platform",
+        "output_type",
+        "status",
+        "model",
+        "prompt",
+        "generation_mode"
+      ],
+      "title": "AssetDTO",
+      "type": "object"
+    },
+    "AssetElementPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "target_key": {
+          "title": "Target Key",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "focus_element_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Focus Element Id"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        },
+        "excluded_reasons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Excluded Reasons",
+          "type": "object"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/IntentConstraint"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/Requirement"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "required_fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Fact Ids",
+          "type": "array"
+        },
+        "generation_material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Generation Material Ids",
+          "type": "array"
+        },
+        "audit_material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Audit Material Ids",
+          "type": "array"
+        },
+        "reference_bindings": {
+          "items": {
+            "$ref": "#/$defs/ReferenceBinding"
+          },
+          "title": "Reference Bindings",
+          "type": "array"
+        },
+        "subject_presentations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Subject Presentations",
+          "type": "object"
+        },
+        "text_only_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Text Only Element Ids",
+          "type": "array"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "target_key",
+        "subject_ids"
+      ],
+      "title": "AssetElementPlan",
+      "type": "object"
+    },
+    "ConstraintCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "constraint_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Constraint Id",
+          "type": "string"
+        },
+        "satisfied": {
+          "title": "Satisfied",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "constraint_id",
+        "satisfied",
+        "reason"
+      ],
+      "title": "ConstraintCheck",
+      "type": "object"
+    },
+    "DetailSetAudit": {
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "distinctiveness": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Distinctiveness"
+        },
+        "role_coverage": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role Coverage"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "error_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "platform",
+        "passed",
+        "distinctiveness",
+        "role_coverage",
+        "issues",
+        "reason"
+      ],
+      "title": "DetailSetAudit",
+      "type": "object"
+    },
+    "Element": {
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Element Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subject Id"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Fact Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "element_id",
+        "kind",
+        "subject_id",
+        "description",
+        "fact_ids"
+      ],
+      "title": "Element",
+      "type": "object"
+    },
+    "ElementCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "presence": {
+          "enum": [
+            "present",
+            "absent",
+            "not_applicable"
+          ],
+          "title": "Presence",
+          "type": "string"
+        },
+        "fidelity_score": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fidelity Score"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "element_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Element Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "presence",
+        "fidelity_score",
+        "reason",
+        "element_id"
+      ],
+      "title": "ElementCheck",
+      "type": "object"
+    },
+    "ErrorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "validation",
+            "configuration",
+            "input",
+            "stale_analysis",
+            "transport",
+            "http",
+            "protocol",
+            "capability",
+            "compliance",
+            "quality",
+            "output"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        }
+      },
+      "required": [
+        "code",
+        "kind",
+        "message"
+      ],
+      "title": "ErrorInfo",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "observation": {
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "material_id",
+        "observation"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Fact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subject Id"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "fact_id",
+        "subject_id",
+        "description",
+        "evidence",
+        "confidence"
+      ],
+      "title": "Fact",
+      "type": "object"
+    },
+    "FactCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "presence": {
+          "enum": [
+            "present",
+            "absent",
+            "not_applicable"
+          ],
+          "title": "Presence",
+          "type": "string"
+        },
+        "fidelity_score": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fidelity Score"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "fact_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Fact Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "presence",
+        "fidelity_score",
+        "reason",
+        "fact_id"
+      ],
+      "title": "FactCheck",
+      "type": "object"
+    },
+    "GenerationAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "enum": [
+            "standard",
+            "strict",
+            "staged_scene",
+            "staged_fusion"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "reference_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reference Ids",
+          "type": "array"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "error_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "stage",
+        "model",
+        "reference_ids",
+        "prompt",
+        "outcome"
+      ],
+      "title": "GenerationAttempt",
+      "type": "object"
+    },
+    "IntentAnalysis": {
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/SelectionProposal"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/IntentConstraint"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "focus_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Focus Element Ids",
+          "type": "array"
+        },
+        "unmet_requirements": {
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "title": "Unmet Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "proposal",
+        "constraints",
+        "focus_element_ids",
+        "unmet_requirements"
+      ],
+      "title": "IntentAnalysis",
+      "type": "object"
+    },
+    "IntentConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "constraint_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Constraint Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "placement",
+            "co_presence",
+            "exclusion",
+            "appearance",
+            "atmosphere"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Element Ids",
+          "type": "array"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "brief",
+            "hint"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_quote": {
+          "minLength": 1,
+          "title": "Source Quote",
+          "type": "string"
+        },
+        "source_material_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Material Id"
+        },
+        "priority": {
+          "enum": [
+            "required",
+            "preferred"
+          ],
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "constraint_id",
+        "kind",
+        "subject_ids",
+        "element_ids",
+        "instruction",
+        "source",
+        "source_quote",
+        "source_material_id",
+        "priority"
+      ],
+      "title": "IntentConstraint",
+      "type": "object"
+    },
+    "Issue": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Issue Id",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "resolution": {
+          "enum": [
+            "selection",
+            "recheck",
+            "reanalyze"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Material Ids",
+          "type": "array"
+        },
+        "element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Element Ids",
+          "type": "array"
+        },
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/IssueOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "issue_id",
+        "code",
+        "resolution",
+        "message"
+      ],
+      "title": "Issue",
+      "type": "object"
+    },
+    "IssueOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SelectionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "selection"
+      ],
+      "title": "IssueOption",
+      "type": "object"
+    },
+    "MaterialAnalysis": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "analysis_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Analysis Id",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "needs_input",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "materials": {
+          "items": {
+            "$ref": "#/$defs/MaterialObservation"
+          },
+          "title": "Materials",
+          "type": "array"
+        },
+        "subjects": {
+          "items": {
+            "$ref": "#/$defs/Subject"
+          },
+          "title": "Subjects",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "elements": {
+          "items": {
+            "$ref": "#/$defs/Element"
+          },
+          "title": "Elements",
+          "type": "array"
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntentAnalysis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "error_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "analysis_id",
+        "fingerprint",
+        "status",
+        "materials",
+        "subjects",
+        "facts",
+        "elements",
+        "intent"
+      ],
+      "title": "MaterialAnalysis",
+      "type": "object"
+    },
+    "MaterialObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "observed_role": {
+          "enum": [
+            "auto",
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Observed Role",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "material_id",
+        "sha256",
+        "observed_role",
+        "summary"
+      ],
+      "title": "MaterialObservation",
+      "type": "object"
+    },
+    "PixelChecks": {
+      "additionalProperties": false,
+      "properties": {
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "width": {
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "title": "Height",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "white_border_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "White Border Ratio"
+        },
+        "export_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Export Bytes"
+        }
+      },
+      "required": [
+        "passed",
+        "width",
+        "height",
+        "reason"
+      ],
+      "title": "PixelChecks",
+      "type": "object"
+    },
+    "ProductInputAudit": {
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "title": "Matches",
+          "type": "boolean"
+        },
+        "observed_product": {
+          "title": "Observed Product",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "matches",
+        "observed_product",
+        "reason"
+      ],
+      "title": "ProductInputAudit",
+      "type": "object"
+    },
+    "QualityReport": {
+      "additionalProperties": false,
+      "properties": {
+        "subject_checks": {
+          "items": {
+            "$ref": "#/$defs/SubjectCheck"
+          },
+          "title": "Subject Checks",
+          "type": "array"
+        },
+        "fact_checks": {
+          "items": {
+            "$ref": "#/$defs/FactCheck"
+          },
+          "title": "Fact Checks",
+          "type": "array"
+        },
+        "element_checks": {
+          "items": {
+            "$ref": "#/$defs/ElementCheck"
+          },
+          "title": "Element Checks",
+          "type": "array"
+        },
+        "constraint_checks": {
+          "items": {
+            "$ref": "#/$defs/ConstraintCheck"
+          },
+          "title": "Constraint Checks",
+          "type": "array"
+        },
+        "visual_quality": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Visual Quality",
+          "type": "integer"
+        },
+        "platform_compliance": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Platform Compliance",
+          "type": "integer"
+        },
+        "garment_fusion": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Garment Fusion",
+          "type": "integer"
+        },
+        "model_preference": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Model Preference",
+          "type": "integer"
+        },
+        "output_intent": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Output Intent",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "model_passed": {
+          "title": "Model Passed",
+          "type": "boolean"
+        },
+        "original_subject_checks": {
+          "items": {
+            "$ref": "#/$defs/SubjectCheck"
+          },
+          "title": "Original Subject Checks",
+          "type": "array"
+        },
+        "reviewed_subject_checks": {
+          "items": {
+            "$ref": "#/$defs/SubjectCheck"
+          },
+          "title": "Reviewed Subject Checks",
+          "type": "array"
+        },
+        "deterministic_checks": {
+          "$ref": "#/$defs/PixelChecks"
+        },
+        "failed_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failed Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "subject_checks",
+        "fact_checks",
+        "element_checks",
+        "constraint_checks",
+        "visual_quality",
+        "platform_compliance",
+        "garment_fusion",
+        "model_preference",
+        "output_intent",
+        "passed",
+        "reason",
+        "model_passed",
+        "deterministic_checks",
+        "failed_checks"
+      ],
+      "title": "QualityReport",
+      "type": "object"
+    },
+    "ReferenceBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Element Ids",
+          "type": "array"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "material_id",
+        "fact_ids",
+        "element_ids",
+        "role"
+      ],
+      "title": "ReferenceBinding",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "target_kind": {
+          "enum": [
+            "subject",
+            "fact",
+            "element",
+            "constraint"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "default_identity",
+            "user_required",
+            "brief_required",
+            "shot_rule",
+            "preferred"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "applicability": {
+          "enum": [
+            "must_show",
+            "preserve_if_visible",
+            "not_applicable"
+          ],
+          "title": "Applicability",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_kind",
+        "target_id",
+        "origin",
+        "applicability",
+        "reason"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "SelectionProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "primary_subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Primary Subject Id"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "primary_subject_id",
+        "subject_ids",
+        "required_element_ids",
+        "preferred_element_ids",
+        "excluded_element_ids"
+      ],
+      "title": "SelectionProposal",
+      "type": "object"
+    },
+    "SelectionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "explicit"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "title": "SelectionSpec",
+      "type": "object"
+    },
+    "Subject": {
+      "additionalProperties": false,
+      "properties": {
+        "subject_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Material Ids",
+          "type": "array"
+        },
+        "identity_fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Identity Fact Ids",
+          "type": "array"
+        },
+        "representative_material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Representative Material Id",
+          "type": "string"
+        },
+        "matches_product": {
+          "title": "Matches Product",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subject_id",
+        "material_ids",
+        "identity_fact_ids",
+        "representative_material_id",
+        "matches_product"
+      ],
+      "title": "Subject",
+      "type": "object"
+    },
+    "SubjectCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "subject_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "same_product": {
+          "title": "Same Product",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject_id",
+        "score",
+        "same_product",
+        "reason"
+      ],
+      "title": "SubjectCheck",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "needs_input"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "presentation_mode": {
+      "title": "Presentation Mode",
+      "type": "string"
+    },
+    "style_prompt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Style Prompt"
+    },
+    "product_attributes": {
+      "additionalProperties": true,
+      "title": "Product Attributes",
+      "type": "object"
+    },
+    "input_check": {
+      "$ref": "#/$defs/ProductInputAudit"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/AssetDTO"
+      },
+      "title": "Assets",
+      "type": "array"
+    },
+    "detail_set_audits": {
+      "items": {
+        "$ref": "#/$defs/DetailSetAudit"
+      },
+      "title": "Detail Set Audits",
+      "type": "array"
+    },
+    "analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MaterialAnalysis"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/Issue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "error_info": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "output_errors": {
+      "items": {
+        "$ref": "#/$defs/ErrorInfo"
+      },
+      "title": "Output Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "status",
+    "presentation_mode",
+    "product_attributes",
+    "input_check",
+    "warnings",
+    "assets",
+    "detail_set_audits",
+    "issues",
+    "output_errors"
+  ],
+  "title": "CreationResultDTO",
+  "type": "object"
+}

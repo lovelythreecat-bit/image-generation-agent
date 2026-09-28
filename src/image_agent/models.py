@@ -36,7 +36,12 @@ class ImageSource(Model):
             raise ValueError("exactly one image source required")
         if self.url:
             url = urlsplit(self.url)
-            if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
+            if (
+                url.scheme not in ("http", "https")
+                or not url.hostname
+                or url.username
+                or url.password
+            ):
                 raise ValueError("HTTP(S) URL without credentials required")
         elif self.url is not None:
             raise ValueError("empty URL")
@@ -62,7 +67,14 @@ class SelectionSpec(Model):
     def lists(self):
         unique(self.subject_ids)
         unique(self.required_element_ids + self.preferred_element_ids + self.excluded_element_ids)
-        if self.mode == "auto" and any((self.subject_ids, self.required_element_ids, self.preferred_element_ids, self.excluded_element_ids)):
+        if self.mode == "auto" and any(
+            (
+                self.subject_ids,
+                self.required_element_ids,
+                self.preferred_element_ids,
+                self.excluded_element_ids,
+            )
+        ):
             raise ValueError("auto selection cannot contain IDs")
         if self.mode == "explicit" and not self.subject_ids:
             raise ValueError("explicit selection requires subjects")
@@ -109,9 +121,14 @@ class CreationRequest(Model):
     @classmethod
     def safe_component(cls, value):
         if value is not None:
-            if (not value or len(value) > 128 or ".." in value or value[-1] in ". "
+            if (
+                not value
+                or len(value) > 128
+                or ".." in value
+                or value[-1] in ". "
                 or re.search(r'[<>:"/\\|?*\x00-\x1f]', value)
-                or re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\..*)?", value)):
+                or re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\..*)?", value)
+            ):
                 raise ValueError("request_id must be a Windows-safe path component")
         return value
 
@@ -129,7 +146,15 @@ class CreationRequest(Model):
             raise ValueError("white background requires pinduoduo")
         if self.market is None:
             p = self.platforms[0]
-            object.__setattr__(self, "market", "CN" if p in ("taobao", "tmall", "jd", "pinduoduo") else "SG" if p in ("shopee", "lazada") else "US")
+            object.__setattr__(
+                self,
+                "market",
+                "CN"
+                if p in ("taobao", "tmall", "jd", "pinduoduo")
+                else "SG"
+                if p in ("shopee", "lazada")
+                else "US",
+            )
         else:
             object.__setattr__(self, "market", self.market.strip().upper())
         return self
@@ -137,14 +162,30 @@ class CreationRequest(Model):
     def normalized_materials(self):
         if self.materials:
             return tuple(self.materials)
-        return (MaterialInput(material_id="product", source=self.product_image, role_hint="identity"), *(
-            MaterialInput(material_id=f"ref-{i}", source=s, role_hint="style") for i, s in enumerate(self.reference_images, 1)
-        ))
+        return (
+            MaterialInput(material_id="product", source=self.product_image, role_hint="identity"),
+            *(
+                MaterialInput(material_id=f"ref-{i}", source=s, role_hint="style")
+                for i, s in enumerate(self.reference_images, 1)
+            ),
+        )
 
 
 class ErrorInfo(Model):
     code: str
-    kind: Literal["validation", "configuration", "input", "stale_analysis", "transport", "http", "protocol", "capability", "compliance", "quality", "output"]
+    kind: Literal[
+        "validation",
+        "configuration",
+        "input",
+        "stale_analysis",
+        "transport",
+        "http",
+        "protocol",
+        "capability",
+        "compliance",
+        "quality",
+        "output",
+    ]
     message: str
     retryable: bool = False
     status_code: int | None = None
@@ -248,7 +289,12 @@ class MaterialAnalysis(Model):
     @model_validator(mode="after")
     def references(self):
         tables = {}
-        for name, items, key in (("material", self.materials, "material_id"), ("subject", self.subjects, "subject_id"), ("fact", self.facts, "fact_id"), ("element", self.elements, "element_id")):
+        for name, items, key in (
+            ("material", self.materials, "material_id"),
+            ("subject", self.subjects, "subject_id"),
+            ("fact", self.facts, "fact_id"),
+            ("element", self.elements, "element_id"),
+        ):
             ids = [getattr(x, key) for x in items]
             unique(ids, name)
             tables[name] = set(ids)
@@ -269,7 +315,12 @@ class MaterialAnalysis(Model):
                 raise ValueError("representative image outside subject")
             if any(facts[f].subject_id != s.subject_id for f in s.identity_fact_ids):
                 raise ValueError("identity fact belongs to another subject")
-            if any(e.material_id not in s.material_ids for f in self.facts if f.subject_id == s.subject_id for e in f.evidence):
+            if any(
+                e.material_id not in s.material_ids
+                for f in self.facts
+                if f.subject_id == s.subject_id
+                for e in f.evidence
+            ):
                 raise ValueError("subject fact evidence outside subject materials")
         for e in self.elements:
             refs(e.fact_ids, "fact")
@@ -286,14 +337,20 @@ class MaterialAnalysis(Model):
             raise ValueError("primary subject not selected")
         refs(p.required_element_ids + p.preferred_element_ids + p.excluded_element_ids, "element")
         selected = set(p.required_element_ids + p.preferred_element_ids)
-        if any(e.subject_id and e.subject_id not in p.subject_ids for e in self.elements if e.element_id in selected):
+        if any(
+            e.subject_id and e.subject_id not in p.subject_ids
+            for e in self.elements
+            if e.element_id in selected
+        ):
             raise ValueError("proposal element outside selected subjects")
         refs(self.intent.focus_element_ids, "element")
         unique([c.constraint_id for c in self.intent.constraints])
         for c in self.intent.constraints:
             refs(c.subject_ids, "subject")
             refs(c.element_ids, "element")
-            if (c.source == "brief" and c.source_material_id is not None) or (c.source == "hint" and c.source_material_id not in tables["material"]):
+            if (c.source == "brief" and c.source_material_id is not None) or (
+                c.source == "hint" and c.source_material_id not in tables["material"]
+            ):
                 raise ValueError("invalid constraint source")
         issues = self.issues + self.intent.unmet_requirements
         unique([i.issue_id for i in issues])
@@ -306,7 +363,12 @@ class MaterialAnalysis(Model):
                     if option.selection.mode != "explicit" or i.resolution == "reanalyze":
                         raise ValueError("option must be actionable explicit selection")
                     refs(option.selection.subject_ids, "subject")
-                    refs(option.selection.required_element_ids + option.selection.preferred_element_ids + option.selection.excluded_element_ids, "element")
+                    refs(
+                        option.selection.required_element_ids
+                        + option.selection.preferred_element_ids
+                        + option.selection.excluded_element_ids,
+                        "element",
+                    )
         return self
 
     def validate_intent_source(self, request):

@@ -1,0 +1,708 @@
+{
+  "$defs": {
+    "Element": {
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Element Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subject Id"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Fact Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "element_id",
+        "kind",
+        "subject_id",
+        "description",
+        "fact_ids"
+      ],
+      "title": "Element",
+      "type": "object"
+    },
+    "ErrorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "validation",
+            "configuration",
+            "input",
+            "stale_analysis",
+            "transport",
+            "http",
+            "protocol",
+            "capability",
+            "compliance",
+            "quality",
+            "output"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        }
+      },
+      "required": [
+        "code",
+        "kind",
+        "message"
+      ],
+      "title": "ErrorInfo",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "observation": {
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "material_id",
+        "observation"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Fact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subject Id"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "fact_id",
+        "subject_id",
+        "description",
+        "evidence",
+        "confidence"
+      ],
+      "title": "Fact",
+      "type": "object"
+    },
+    "IntentAnalysis": {
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/SelectionProposal"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/IntentConstraint"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "focus_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Focus Element Ids",
+          "type": "array"
+        },
+        "unmet_requirements": {
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "title": "Unmet Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "proposal",
+        "constraints",
+        "focus_element_ids",
+        "unmet_requirements"
+      ],
+      "title": "IntentAnalysis",
+      "type": "object"
+    },
+    "IntentConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "constraint_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Constraint Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "placement",
+            "co_presence",
+            "exclusion",
+            "appearance",
+            "atmosphere"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Element Ids",
+          "type": "array"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "brief",
+            "hint"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_quote": {
+          "minLength": 1,
+          "title": "Source Quote",
+          "type": "string"
+        },
+        "source_material_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Material Id"
+        },
+        "priority": {
+          "enum": [
+            "required",
+            "preferred"
+          ],
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "constraint_id",
+        "kind",
+        "subject_ids",
+        "element_ids",
+        "instruction",
+        "source",
+        "source_quote",
+        "source_material_id",
+        "priority"
+      ],
+      "title": "IntentConstraint",
+      "type": "object"
+    },
+    "Issue": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Issue Id",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "resolution": {
+          "enum": [
+            "selection",
+            "recheck",
+            "reanalyze"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Material Ids",
+          "type": "array"
+        },
+        "element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Element Ids",
+          "type": "array"
+        },
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/IssueOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "issue_id",
+        "code",
+        "resolution",
+        "message"
+      ],
+      "title": "Issue",
+      "type": "object"
+    },
+    "IssueOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SelectionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "selection"
+      ],
+      "title": "IssueOption",
+      "type": "object"
+    },
+    "MaterialObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "observed_role": {
+          "enum": [
+            "auto",
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Observed Role",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "material_id",
+        "sha256",
+        "observed_role",
+        "summary"
+      ],
+      "title": "MaterialObservation",
+      "type": "object"
+    },
+    "SelectionProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "primary_subject_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Primary Subject Id"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "primary_subject_id",
+        "subject_ids",
+        "required_element_ids",
+        "preferred_element_ids",
+        "excluded_element_ids"
+      ],
+      "title": "SelectionProposal",
+      "type": "object"
+    },
+    "SelectionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "explicit"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "title": "SelectionSpec",
+      "type": "object"
+    },
+    "Subject": {
+      "additionalProperties": false,
+      "properties": {
+        "subject_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "material_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Material Ids",
+          "type": "array"
+        },
+        "identity_fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Identity Fact Ids",
+          "type": "array"
+        },
+        "representative_material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Representative Material Id",
+          "type": "string"
+        },
+        "matches_product": {
+          "title": "Matches Product",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subject_id",
+        "material_ids",
+        "identity_fact_ids",
+        "representative_material_id",
+        "matches_product"
+      ],
+      "title": "Subject",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "analysis_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "fingerprint": {
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ready",
+        "needs_input",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "materials": {
+      "items": {
+        "$ref": "#/$defs/MaterialObservation"
+      },
+      "title": "Materials",
+      "type": "array"
+    },
+    "subjects": {
+      "items": {
+        "$ref": "#/$defs/Subject"
+      },
+      "title": "Subjects",
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/Fact"
+      },
+      "title": "Facts",
+      "type": "array"
+    },
+    "elements": {
+      "items": {
+        "$ref": "#/$defs/Element"
+      },
+      "title": "Elements",
+      "type": "array"
+    },
+    "intent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IntentAnalysis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/Issue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "error_info": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "analysis_id",
+    "fingerprint",
+    "status",
+    "materials",
+    "subjects",
+    "facts",
+    "elements",
+    "intent"
+  ],
+  "title": "MaterialAnalysis",
+  "type": "object"
+}

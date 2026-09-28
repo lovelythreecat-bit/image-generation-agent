@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "ErrorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "validation",
+            "configuration",
+            "input",
+            "stale_analysis",
+            "transport",
+            "http",
+            "protocol",
+            "capability",
+            "compliance",
+            "quality",
+            "output"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        }
+      },
+      "required": [
+        "code",
+        "kind",
+        "message"
+      ],
+      "title": "ErrorInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    },
+    "error": {
+      "$ref": "#/$defs/ErrorInfo"
+    }
+  },
+  "required": [
+    "error"
+  ],
+  "title": "ErrorDTO",
+  "type": "object"
+}

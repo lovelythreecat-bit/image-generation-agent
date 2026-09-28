@@ -27,10 +27,17 @@ class AgentConfig(Model):
 
     @classmethod
     def from_env(cls):
-        return cls(**{f: os.environ[f"IMAGE_AGENT_{f.upper()}"] for f in cls.model_fields if os.environ.get(f"IMAGE_AGENT_{f.upper()}")})
+        return cls(
+            **{
+                f: os.environ[f"IMAGE_AGENT_{f.upper()}"]
+                for f in cls.model_fields
+                if os.environ.get(f"IMAGE_AGENT_{f.upper()}")
+            }
+        )
 
     def model_name(self, alias):
         if alias not in ("pro", "fast", "base"):
             from .errors import ConfigurationError
+
             raise ConfigurationError("unknown image model alias")
         return getattr(self, f"model_{alias}")

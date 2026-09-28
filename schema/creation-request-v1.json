@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "MaterialDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "media_id": {
+          "minLength": 1,
+          "title": "Media Id",
+          "type": "string"
+        },
+        "role_hint": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Role Hint",
+          "type": "string"
+        },
+        "subject_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Hint"
+        },
+        "element_hints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Element Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "material_id",
+        "media_id"
+      ],
+      "title": "MaterialDTO",
+      "type": "object"
+    },
+    "SelectionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "explicit"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "title": "SelectionSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "product_name": {
+      "title": "Product Name",
+      "type": "string"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "platforms": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Platforms",
+      "type": "array"
+    },
+    "output_types": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Output Types",
+      "type": "array"
+    },
+    "materials": {
+      "items": {
+        "$ref": "#/$defs/MaterialDTO"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Materials",
+      "type": "array"
+    },
+    "creative_brief": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Creative Brief"
+    },
+    "selection": {
+      "$ref": "#/$defs/SelectionSpec"
+    },
+    "style_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Style Hint"
+    },
+    "presentation_mode": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "model_wear",
+        "product_only"
+      ],
+      "title": "Presentation Mode",
+      "type": "string"
+    },
+    "model_preference": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "female",
+        "male",
+        "no_face"
+      ],
+      "title": "Model Preference",
+      "type": "string"
+    },
+    "market": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Market"
+    },
+    "aspect_ratio": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "1:1",
+        "3:4",
+        "4:5",
+        "9:16",
+        "16:9",
+        "4:1",
+        "1:4"
+      ],
+      "title": "Aspect Ratio",
+      "type": "string"
+    },
+    "image_size": {
+      "default": "2K",
+      "enum": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "title": "Image Size",
+      "type": "string"
+    },
+    "image_model": {
+      "default": "pro",
+      "enum": [
+        "pro",
+        "fast",
+        "base"
+      ],
+      "title": "Image Model",
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    }
+  },
+  "required": [
+    "product_name",
+    "category",
+    "platforms",
+    "output_types",
+    "materials"
+  ],
+  "title": "CreationRequestDTO",
+  "type": "object"
+}

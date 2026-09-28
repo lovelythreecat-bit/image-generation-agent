@@ -15,12 +15,19 @@
 ## Tasks
 
 1. Core contracts implemented: RED 35 collected failures (missing models/config); GREEN `.venv/Scripts/python.exe -m pytest tests/test_models.py tests/test_config.py -q`: 35 passed. Additional source-intent validation exercised with vision in Task 5.
-2. In progress: platform/prompt/compliance.
-3. Pending: transport/generation.
-4. Pending: image I/O/quality.
-5. Pending: vision.
-5A. Pending: selection.
-6. Pending: pipeline.
-7. Pending: output/CLI.
-7A. Pending: JSON integration.
+2. Core rules complete: RED 5 collected failures; GREEN full suite 40 passed. Platform file copied unchanged; prompt text updated for multi-source plans and frozen requirements.
+3. Core transport complete: RED 14 failures after fixing Windows socketpair test guard; GREEN full suite 54 passed. Shared permits use a thread lock and cancellable polling, no loop-bound global semaphore. Supplier protocol remains unverified pending documentation checkpoint.
+4. Core image I/O/quality complete: RED 10 failures; GREEN full suite 64 passed. Original bytes preserved; white export, decoding, local thresholds and audit IDs checked.
+5. Core vision complete: RED 6 failures; fixed proposal/intent constraint ownership after 2 test failures; GREEN 6 vision tests passed (68 other cases passed in preceding run).
+5A. Core selection complete: RED 5 failures; GREEN full suite 75 passed. OR/AND evidence, capacity, white optional/required conflict, pending recovery and fingerprint tested.
+6. Core pipeline complete: RED 9 failures; GREEN 9 pipeline tests passed. Four-asset order, per-asset repair, staged, high-score false, recheck, snapshot, cancellation, white export covered.
+7. Core output/CLI complete: RED 12 failures (existing cancellation utility already passed); GREEN full suite 97 passed. JPEG bytes, atomic writes, per-file/manifest failures, exit codes and repeat cancellation covered.
+7A. Core JSON integration complete: RED 7 failures and 9 existing passes; GREEN full suite 104 passed. DTO round trips, media binding, safe CLI paths and exported schemas.
 8. Pending: isolation, packaging, docs and final review.
+
+## Follow-up validation before final completion
+
+- Broaden branch-boundary coverage against the full plan; passing core tests does not yet establish all task acceptance bullets.
+- Protocol documentation checkpoint completed 2026-09-29; see docs/provider-protocol.md. No paid supplier calls authorized or performed.
+- Ruling: staged cancellation helper is shared in transport.py for pure CPU tasks and final save tasks — one repeat-cancellation mechanism avoids incompatible lifecycle behavior.
+- Ruling: tasks 2–7A share an integration checkpoint commit after interruption and API wiring, followed by acceptance fixes — preserves a runnable public import instead of commits referencing not-yet-added modules. Per-task RED/GREEN evidence remains recorded above.

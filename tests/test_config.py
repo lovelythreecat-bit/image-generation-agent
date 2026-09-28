@@ -4,6 +4,7 @@ from pydantic import ValidationError
 
 def test_env_defaults_and_isolation(monkeypatch):
     from image_agent.config import AgentConfig
+
     monkeypatch.setenv("OPENROUTER_API_KEY", "should-not-read")
     monkeypatch.setenv("IMAGE_AGENT_QUALITY_MODEL", "test-quality")
     cfg = AgentConfig.from_env()
@@ -15,9 +16,18 @@ def test_env_defaults_and_isolation(monkeypatch):
     assert cfg.vision_image_limit == 12
 
 
-@pytest.mark.parametrize("field", ["request_timeout_seconds", "model_concurrency", "generation_reference_limit", "vision_image_limit"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "request_timeout_seconds",
+        "model_concurrency",
+        "generation_reference_limit",
+        "vision_image_limit",
+    ],
+)
 def test_positive_capacity(field):
     from image_agent.config import AgentConfig
+
     with pytest.raises(ValidationError):
         AgentConfig(**{field: 0})
 
@@ -25,6 +35,7 @@ def test_positive_capacity(field):
 def test_secrets_and_error_mapping():
     from image_agent.config import AgentConfig
     from image_agent.errors import ProviderError, make_error_info
+
     assert "secret-token" not in repr(AgentConfig(openrouter_api_key="secret-token"))
     e = make_error_info(ProviderError("timeout", kind="transport"))
     assert (e.code, e.retryable) == ("provider_transport", True)
