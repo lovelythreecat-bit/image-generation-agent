@@ -323,7 +323,8 @@ def compile_element_plan(request, target, context, config):
     plan = AssetElementPlan(
         target_key=target.target_key,
         legacy_input=not bool(request.materials),
-        subject_ids=selection.subject_ids,
+        subject_ids=[selection.primary_subject_id]
+        + [sid for sid in selection.subject_ids if sid != selection.primary_subject_id],
         focus_element_id=focus,
         required_element_ids=required,
         preferred_element_ids=preferred,
@@ -550,3 +551,38 @@ def select_references(plan, analysis, materials, *, limit, reserve_stage=False):
         )
         for b in adjusted.reference_bindings
     )
+
+
+def bind_generation_references(plan, analysis, references):
+    """Rebind an attempt's image numbers while retaining its frozen requirements."""
+    rebound = plan.model_copy(deep=True)
+    previous = {b.material_id: b for b in plan.reference_bindings if b.material_id}
+    bindings = []
+    for index, reference in enumerate(references, 1):
+        if reference.material_id:
+            binding = previous[reference.material_id].model_copy(update={"index": index})
+        else:
+            binding = ReferenceBinding(
+                index=index,
+                stage_id=reference.stage_id,
+                fact_ids=[],
+                element_ids=reference.element_ids,
+                role=reference.role,
+            )
+        bindings.append(binding)
+    rebound.reference_bindings = bindings
+    rebound.generation_material_ids = [r.material_id for r in references if r.material_id]
+    selected = set(rebound.generation_material_ids)
+    stage_elements = {eid for r in references if r.stage_id for eid in r.element_ids}
+    facts = {f.fact_id: f for f in analysis.facts}
+    rebound.text_only_element_ids = [
+        e.element_id
+        for e in analysis.elements
+        if e.element_id in plan.preferred_element_ids
+        and e.element_id not in stage_elements
+        and any(
+            not selected.intersection(v.material_id for v in facts[fid].evidence)
+            for fid in e.fact_ids
+        )
+    ]
+    return rebound

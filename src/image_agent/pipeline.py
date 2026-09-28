@@ -38,10 +38,12 @@ from .quality import (
     choose_retry,
     evaluate_quality,
     export_white_background,
+    review_subject_ids,
     validate_check_ids,
 )
 from .selection import (
     analysis_fingerprint,
+    bind_generation_references,
     compile_element_plan,
     finalize_selection,
     resolve_selection,
@@ -394,10 +396,24 @@ async def _create_asset(request, target, context, config, dependencies):
                     from .images import generated_image
 
                     await compute(generated_image, stage)
+                    fusion_references = fusion + (
+                        GenerationReference(
+                            stage_id="stage",
+                            data=stage,
+                            role="scene",
+                            element_ids=list(
+                                dict.fromkeys(eid for ref in scene_refs for eid in ref.element_ids)
+                            ),
+                        ),
+                    )
+                    plan = bind_generation_references(plan, context.analysis, fusion_references)
+                    asset.element_plan = plan
+                    asset.reference_bindings = plan.reference_bindings
+                    prompt = build_prompt(request, target, context, plan, "staged")
                     data = await generate(
                         "staged_fusion",
                         prompt,
-                        fusion + (GenerationReference(stage_id="stage", data=stage, role="scene"),),
+                        fusion_references,
                     )
             if mode != "staged":
                 data = await generate(mode, prompt, refs)
@@ -407,17 +423,7 @@ async def _create_asset(request, target, context, config, dependencies):
             audit = await dependencies.vision.audit_image(request, target, context, plan, data)
             quality = evaluate_quality(audit, pixels, target, plan)
             asset.quality = quality
-            pending = tuple(
-                s.subject_id
-                for s in audit.subject_checks
-                if 80 <= s.score <= 84
-                and any(
-                    r.target_kind == "subject"
-                    and r.target_id == s.subject_id
-                    and r.applicability != "not_applicable"
-                    for r in plan.requirements
-                )
-            )
+            pending = review_subject_ids(audit, plan)
             if pending:
                 review = await dependencies.vision.review_product(context, plan, pending, data)
                 quality = evaluate_quality(audit, pixels, target, plan, review=review)
@@ -432,7 +438,7 @@ async def _create_asset(request, target, context, config, dependencies):
             asset.attempts[-1].error_info = info
             if iteration == 1:
                 raise AgentError(quality.reason, code="quality_failed", kind="quality")
-            mode = choose_retry(target, quality)
+            mode = choose_retry(target, quality, plan)
     except AgentError as error:
         asset.error_info = make_error_info(error)
         asset.error = asset.error_info.message

@@ -27,6 +27,7 @@ from .models import (
     ReferenceBinding,
     Role,
     SelectionSpec,
+    normalize_string_list,
 )
 
 
@@ -59,7 +60,7 @@ class CreationRequestDTO(Model):
     @field_validator("platforms", "output_types", mode="before")
     @classmethod
     def normalized_lists(cls, values):
-        return list(dict.fromkeys(v.strip().lower() for v in values))
+        return normalize_string_list(values)
 
     @model_validator(mode="after")
     def validate_request_fields(self):

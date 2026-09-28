@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from .sanitization import redact
+
 Id = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 Score = Annotated[int, Field(strict=True, ge=0, le=100)]
 Role = Literal["auto", "identity", "detail", "accessory", "scene", "style"]
@@ -21,6 +23,23 @@ OUTPUTS = ("main_image", "detail_page", "pdd_white_background")
 
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def sanitize_messages(cls, value, info):
+        if info.field_name in {"message", "reason", "error", "label", "code"} and isinstance(
+            value, str
+        ):
+            return redact(value)
+        if info.field_name in {"warnings", "issues", "failed_checks"} and isinstance(value, list):
+            return [redact(item) if isinstance(item, str) else item for item in value]
+        return value
+
+
+def normalize_string_list(values):
+    if not isinstance(values, (list, tuple)) or not all(isinstance(v, str) for v in values):
+        raise ValueError("expected a list of strings")
+    return list(dict.fromkeys(v.strip().lower() for v in values))
 
 
 def unique(values, label="IDs"):
@@ -115,7 +134,7 @@ class CreationRequest(Model):
     @field_validator("platforms", "output_types", mode="before")
     @classmethod
     def enumerations(cls, values, info):
-        values = list(dict.fromkeys(v.strip().lower() for v in values))
+        values = normalize_string_list(values)
         allowed = PLATFORMS if info.field_name == "platforms" else OUTPUTS
         if not values or any(v not in allowed for v in values):
             raise ValueError("empty or unknown platform/output")
@@ -489,10 +508,17 @@ class Requirement(Model):
 
 class ReferenceBinding(Model):
     index: int
-    material_id: Id
+    material_id: Id | None = None
+    stage_id: Id | None = None
     fact_ids: list[Id]
     element_ids: list[Id]
     role: str
+
+    @model_validator(mode="after")
+    def one_source(self):
+        if (self.material_id is None) == (self.stage_id is None):
+            raise ValueError("binding requires exactly one material or stage ID")
+        return self
 
 
 class AssetElementPlan(Model):

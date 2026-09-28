@@ -64,6 +64,19 @@ def validate_check_ids(checks, expected, key):
         raise ProviderError(f"audit {key} IDs are missing, duplicated or unknown")
 
 
+def review_subject_ids(audit, plan):
+    applicable = {
+        r.target_id
+        for r in plan.requirements
+        if r.target_kind == "subject" and r.applicability != "not_applicable"
+    }
+    return tuple(
+        s.subject_id
+        for s in audit.subject_checks
+        if s.subject_id in applicable and 80 <= s.score <= 84
+    )
+
+
 def evaluate_quality(audit, pixels, target, plan, *, review=None):
     requirements = {
         kind: [r for r in plan.requirements if r.target_kind == kind]
@@ -77,7 +90,7 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
     subjects = list(original)
     reviewed = []
     if review is not None:
-        ids = [s.subject_id for s in subjects if 80 <= s.score <= 84]
+        ids = review_subject_ids(audit, plan)
         validate_check_ids(review.subject_checks, ids, "subject_id")
         reviewed = review.subject_checks
         replacements = {s.subject_id: s for s in reviewed if s.same_product and s.score >= 85}
@@ -131,11 +144,24 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
     )
 
 
-def choose_retry(target, quality):
+def choose_retry(target, quality, plan=None):
     if strict_catalog(target):
         return "strict"
+    applicable = (
+        {
+            r.target_id
+            for r in plan.requirements
+            if r.target_kind == "subject" and r.applicability != "not_applicable"
+        }
+        if plan
+        else {s.subject_id for s in quality.subject_checks}
+    )
     if (
-        any(s.score < 85 or not s.same_product for s in quality.subject_checks)
+        any(
+            (s.score < 85 or not s.same_product)
+            for s in quality.subject_checks
+            if s.subject_id in applicable
+        )
         or quality.garment_fusion < 80
         or any(w in quality.reason for w in ("融合", "穿着", "人体", "贴合", "服装", "上身"))
     ):

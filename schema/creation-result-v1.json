@@ -1316,9 +1316,30 @@
           "type": "integer"
         },
         "material_id": {
-          "pattern": "^[A-Za-z0-9_-]{1,64}$",
-          "title": "Material Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Material Id"
+        },
+        "stage_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage Id"
         },
         "fact_ids": {
           "items": {
@@ -1343,7 +1364,6 @@
       },
       "required": [
         "index",
-        "material_id",
         "fact_ids",
         "element_ids",
         "role"

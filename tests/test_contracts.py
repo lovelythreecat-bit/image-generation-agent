@@ -20,6 +20,38 @@ def dto_data():
     )
 
 
+async def test_integration_adapter_executes_real_selection_pipeline():
+    from examples.integration_adapter import create_from_media
+    from image_agent import AgentConfig, CreationRequestDTO
+    from image_agent.pipeline import Dependencies, prepare_analysis, run_pipeline
+    from tests.fakes import FakeGenerator, FakeVision
+    from tests.test_images import picture
+
+    cfg = AgentConfig()
+    vision = FakeVision()
+
+    async def load(source):
+        return source.data
+
+    deps = Dependencies(vision=vision, generator=FakeGenerator(), load=load)
+
+    async def analyze(request, config):
+        return (await prepare_analysis(request, config, deps)).analysis
+
+    async def create(request, config, *, analysis):
+        return await run_pipeline(request, config, dependencies=deps, analysis=analysis)
+
+    bundle = await create_from_media(
+        CreationRequestDTO(**dto_data()),
+        {"upload1": picture()},
+        config=cfg,
+        analyze=analyze,
+        create=create,
+    )
+    assert bundle.dto.status == "succeeded" and bundle.blobs
+    assert vision.calls.count("discover") == 1 and vision.calls.count("evidence") == 1
+
+
 def test_request_binding_and_closed_schema():
     from image_agent.contracts import CreationRequestDTO, request_from_dto
 

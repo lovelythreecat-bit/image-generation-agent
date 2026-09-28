@@ -1,6 +1,42 @@
 from image_agent.models import AssetElementPlan, CreationRequest
 
 
+def test_source_derived_prompt_fixtures(request_data):
+    import json
+    from pathlib import Path
+
+    from image_agent import AgentConfig
+    from image_agent.compliance import apply_compliance
+    from image_agent.prompt import build_prompt, build_targets
+    from image_agent.selection import compile_element_plan
+    from tests.test_selection import context
+
+    cases = json.loads((Path(__file__).parent / "fixtures/prompt_cases.json").read_text("utf-8"))[
+        "cases"
+    ]
+    for case in cases:
+        request = CreationRequest(
+            **(
+                request_data
+                | dict(
+                    platforms=[case["platform"]],
+                    output_types=[case["output"]],
+                    presentation_mode=case["presentation"],
+                    model_preference=case["preference"],
+                    style_hint=case["style"],
+                )
+            )
+        )
+        target = build_targets(request, case["presentation"])[0]
+        ctx = context(request)
+        plan = compile_element_plan(request, target, ctx, AgentConfig())
+        prompt = apply_compliance(request, target, build_prompt(request, target, ctx, plan)).prompt
+        for token in case["contains"]:
+            assert token in prompt, case["name"]
+        for token in case["absent"]:
+            assert token not in prompt, case["name"]
+
+
 def test_targets_order_and_white_override(request_data):
     from image_agent.prompt import build_targets, resolve_presentation
 

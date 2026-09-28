@@ -155,7 +155,13 @@ def is_apparel(text):
 def is_placeholder(request):
     name = request.product_name.lower()
     return request.category.lower() in ("general", "unknown", "其他") and (
-        name == "用户上传商品" or bool(re.match(r"(?:sku-|(?:粘贴|上传|pasted|uploaded))", name))
+        name == "用户上传商品"
+        or re.fullmatch(
+            r"(?:clipboard|pasted|upload(?:ed)?(?:[-_]?product)?|image|img)[-_]?(?:\d+|[0-9a-f-]{8,})?",
+            name,
+        )
+        is not None
+        or re.fullmatch(r"sku[-_ ]?[a-z0-9]+(?:[-_][a-z0-9]+)*", name) is not None
     )
 
 
