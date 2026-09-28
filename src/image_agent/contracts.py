@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .errors import AgentError, make_error_info
 from .images import image_format
@@ -20,6 +20,8 @@ from .models import (
     Issue,
     MaterialAnalysis,
     Model,
+    OutputType,
+    Platform,
     ProductInputAudit,
     QualityReport,
     ReferenceBinding,
@@ -40,8 +42,8 @@ class CreationRequestDTO(Model):
     schema_version: Literal["1.0"] = "1.0"
     product_name: str
     category: str
-    platforms: list[str]
-    output_types: list[str]
+    platforms: list[Platform]
+    output_types: list[OutputType]
     materials: list[MaterialDTO] = Field(min_length=1, max_length=8)
     creative_brief: str | None = None
     selection: SelectionSpec = Field(default_factory=SelectionSpec)
@@ -53,6 +55,11 @@ class CreationRequestDTO(Model):
     image_size: Literal["1K", "2K", "4K"] = "2K"
     image_model: Literal["pro", "fast", "base"] = "pro"
     request_id: str | None = None
+
+    @field_validator("platforms", "output_types", mode="before")
+    @classmethod
+    def normalized_lists(cls, values):
+        return list(dict.fromkeys(v.strip().lower() for v in values))
 
     @model_validator(mode="after")
     def validate_request_fields(self):

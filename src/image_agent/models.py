@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 Id = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 Score = Annotated[int, Field(strict=True, ge=0, le=100)]
 Role = Literal["auto", "identity", "detail", "accessory", "scene", "style"]
+Platform = Literal[
+    "amazon", "taobao", "tmall", "jd", "pinduoduo", "shopee", "lazada", "shein", "temu"
+]
+OutputType = Literal["main_image", "detail_page", "pdd_white_background"]
 Presence = Literal["present", "absent", "not_applicable"]
 PLATFORMS = ("amazon", "taobao", "tmall", "jd", "pinduoduo", "shopee", "lazada", "shein", "temu")
 OUTPUTS = ("main_image", "detail_page", "pdd_white_background")
@@ -84,8 +88,8 @@ class SelectionSpec(Model):
 class CreationRequest(Model):
     product_name: str
     category: str
-    platforms: list[str]
-    output_types: list[str]
+    platforms: list[Platform]
+    output_types: list[OutputType]
     materials: list[MaterialInput] = Field(default_factory=list, max_length=8)
     creative_brief: str | None = None
     selection: SelectionSpec = Field(default_factory=SelectionSpec)
@@ -108,7 +112,7 @@ class CreationRequest(Model):
             raise ValueError("must not be blank")
         return value.strip()
 
-    @field_validator("platforms", "output_types")
+    @field_validator("platforms", "output_types", mode="before")
     @classmethod
     def enumerations(cls, values, info):
         values = list(dict.fromkeys(v.strip().lower() for v in values))
@@ -332,6 +336,8 @@ class MaterialAnalysis(Model):
                 raise ValueError("intent required unless discovery failed")
             return self
         p = self.intent.proposal
+        if self.status == "ready" and (not p.subject_ids or p.primary_subject_id is None):
+            raise ValueError("ready analysis requires a selected primary subject")
         refs(p.subject_ids, "subject")
         if p.primary_subject_id is not None and p.primary_subject_id not in p.subject_ids:
             raise ValueError("primary subject not selected")
@@ -491,6 +497,7 @@ class ReferenceBinding(Model):
 
 class AssetElementPlan(Model):
     target_key: str
+    legacy_input: bool = False
     subject_ids: list[Id]
     focus_element_id: Id | None = None
     required_element_ids: list[Id] = Field(default_factory=list)

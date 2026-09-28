@@ -89,7 +89,7 @@ def resolve_selection(request, analysis):
             constraints=analysis.intent.constraints,
             focus_element_ids=[e for e in analysis.intent.focus_element_ids if e in selected],
         )
-        if args["subject_ids"]
+        if args["subject_ids"] and args["primary_subject_id"]
         else None
     )
     draft = SelectionDraft(candidate=candidate)
@@ -167,6 +167,34 @@ def resolve_selection(request, analysis):
             )
         else:
             draft.pending_issues.append(issue)
+    required_facts = {
+        f
+        for s in analysis.subjects
+        if s.subject_id in args["subject_ids"]
+        for f in s.identity_fact_ids
+    }
+    required_elements = set(args["required_element_ids"])
+    required_elements.update(
+        e
+        for c in analysis.intent.constraints
+        if c.priority == "required" and c.kind != "exclusion"
+        for e in c.element_ids
+    )
+    required_facts.update(
+        f for e in analysis.elements if e.element_id in required_elements for f in e.fact_ids
+    )
+    covered = {f for i in draft.pending_issues + draft.blocking_issues for f in i.fact_ids}
+    for fact in analysis.facts:
+        if fact.fact_id in required_facts - covered and fact.confidence < 0.7:
+            draft.pending_issues.append(
+                Issue(
+                    issue_id="confidence-" + fact.fact_id[:48],
+                    code="low_confidence",
+                    resolution="recheck",
+                    message="必需事实可信度不足，请核对素材",
+                    fact_ids=[fact.fact_id],
+                )
+            )
     return draft
 
 
@@ -294,6 +322,7 @@ def compile_element_plan(request, target, context, config):
         _conflict("白底单件规则不支持多个必需主体")
     plan = AssetElementPlan(
         target_key=target.target_key,
+        legacy_input=not bool(request.materials),
         subject_ids=selection.subject_ids,
         focus_element_id=focus,
         required_element_ids=required,
@@ -460,6 +489,14 @@ def _populate_references(plan, analysis, materials, limit, *, legacy=False):
     related.update(mid for fid in relevant_facts for mid in evidence(fid))
     if legacy:
         related = {m for m in related if not m.startswith("ref-") or m == "ref-1"}
+        catalog = (
+            plan.target_key.startswith("amazon.main_image.")
+            or ".pdd_white_background." in plan.target_key
+        )
+        if not catalog and "ref-1" in ordered:
+            related.add("ref-1")
+            if "ref-1" not in chosen and len(chosen) < limit:
+                chosen.append("ref-1")
     plan.generation_material_ids = chosen
     plan.audit_material_ids = [m for m in ordered if m in related]
     plan.reference_bindings = [
@@ -476,7 +513,9 @@ def _populate_references(plan, analysis, materials, limit, *, legacy=False):
                 for e in plan.required_element_ids + plan.preferred_element_ids
                 if any(mid in evidence(f) for f in elements[e].fact_ids)
             ],
-            role="identity"
+            role="style"
+            if legacy and mid == "ref-1"
+            else "identity"
             if any(subjects[s].representative_material_id == mid for s in visible)
             else next(
                 (
@@ -499,7 +538,7 @@ def select_references(plan, analysis, materials, *, limit, reserve_stage=False):
         analysis,
         materials,
         limit - int(reserve_stage),
-        legacy=any(m.material_id == "product" and m.role_hint == "identity" for m in materials),
+        legacy=plan.legacy_input,
     )
     by_id = {m.material_id: m.data for m in materials}
     return tuple(

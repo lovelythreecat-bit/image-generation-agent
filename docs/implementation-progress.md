@@ -23,7 +23,7 @@
 6. Core pipeline complete: RED 9 failures; GREEN 9 pipeline tests passed. Four-asset order, per-asset repair, staged, high-score false, recheck, snapshot, cancellation, white export covered.
 7. Core output/CLI complete: RED 12 failures (existing cancellation utility already passed); GREEN full suite 97 passed. JPEG bytes, atomic writes, per-file/manifest failures, exit codes and repeat cancellation covered.
 7A. Core JSON integration complete: RED 7 failures and 9 existing passes; GREEN full suite 104 passed. DTO round trips, media binding, safe CLI paths and exported schemas.
-8. Pending: isolation, packaging, docs and final review.
+8. Installation/docs implemented; final review pending. Full suite 127 passed. `python -m build --no-isolation` built wheel+sdist; runtime-only second environment installed wheel offline. From external TEMP directory, public API with MockTransport, module CLI and console CLI passed. Wheel metadata has exactly httpx, pydantic, Pillow runtime requirements; pytest absent.
 
 ## Follow-up validation before final completion
 
@@ -31,3 +31,6 @@
 - Protocol documentation checkpoint completed 2026-09-29; see docs/provider-protocol.md. No paid supplier calls authorized or performed.
 - Ruling: staged cancellation helper is shared in transport.py for pure CPU tasks and final save tasks — one repeat-cancellation mechanism avoids incompatible lifecycle behavior.
 - Ruling: tasks 2–7A share an integration checkpoint commit after interruption and API wiring, followed by acceptance fixes — preserves a runnable public import instead of commits referencing not-yet-added modules. Per-task RED/GREEN evidence remains recorded above.
+- Acceptance sweep: 17 new cases exposed 3 omissions (ready primary, low-confidence selection evidence, DTO enums). All fixed RED→GREEN; suite 121 passed.
+- Public API sweep: 6 cases exposed legacy first-reference omission and stale exported schema. Fixed RED→GREEN; suite 127 passed.
+- Ruling: build with --no-isolation using installed hatchling/build — avoids another network dependency install while producing the same PEP 517 wheel/sdist; separate clean runtime environment validates independence.

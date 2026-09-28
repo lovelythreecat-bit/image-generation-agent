@@ -120,6 +120,17 @@
     },
     "platforms": {
       "items": {
+        "enum": [
+          "amazon",
+          "taobao",
+          "tmall",
+          "jd",
+          "pinduoduo",
+          "shopee",
+          "lazada",
+          "shein",
+          "temu"
+        ],
         "type": "string"
       },
       "title": "Platforms",
@@ -127,6 +138,11 @@
     },
     "output_types": {
       "items": {
+        "enum": [
+          "main_image",
+          "detail_page",
+          "pdd_white_background"
+        ],
         "type": "string"
       },
       "title": "Output Types",
