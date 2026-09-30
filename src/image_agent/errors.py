@@ -60,6 +60,9 @@ def make_error_info(error):
         kind=error.kind,
         message=redact(error.message),
         status_code=error.status_code,
-        retryable=error.kind == "transport"
-        or (error.kind == "http" and error.status_code in (429, 502, 503, 504)),
+        retryable=error.code != "generation_uncertain"
+        and (
+            error.kind == "transport"
+            or (error.kind == "http" and error.status_code in (429, 502, 503, 504))
+        ),
     )

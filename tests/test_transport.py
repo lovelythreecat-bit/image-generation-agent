@@ -51,6 +51,49 @@ async def test_bad_json_not_retried():
     assert len(calls) == 1
 
 
+async def test_http_error_preserves_provider_reason_without_credentials():
+    from image_agent.transport import HttpTransport
+
+    key = "private-test-credential-123"
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(
+            403,
+            json={
+                "error": {"message": f"Model access denied for {key}; token=secret-value"},
+                "debug": "private debug data",
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderError) as caught:
+            await HttpTransport(AgentConfig(openrouter_api_key=key), client=client).post_json(
+                "/chat/completions", {}
+            )
+    error = caught.value
+    assert error.status_code == 403 and error.kind == "http"
+    assert "Model access denied" in error.message
+    assert key not in error.message and "secret-value" not in error.message
+    assert "private debug data" not in error.message
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("body", [b"<html>private gateway page</html>", b"[]", b'{"error": 403}'])
+async def test_http_error_with_unstructured_body_keeps_status(body):
+    from image_agent.transport import HttpTransport
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(403, content=body))
+    ) as client:
+        with pytest.raises(ProviderError) as caught:
+            await HttpTransport(AgentConfig(), client=client).post_json("/chat/completions", {})
+    assert caught.value.status_code == 403
+    assert "HTTP 403" in caught.value.message
+    assert "private gateway page" not in caught.value.message
+
+
 async def test_shared_permits_cancel_and_conflict():
     from image_agent.transport import model_permit
 

@@ -1,4 +1,4 @@
-"""Regenerate version 1 JSON contracts from the public DTOs."""
+"""Export current contracts, preserving the historical result-v1 schema."""
 
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ def main():
     for name, model in (
         ("creation-request-v1", CreationRequestDTO),
         ("material-analysis-v1", MaterialAnalysis),
-        ("creation-result-v1", CreationResultDTO),
+        ("creation-result-v2", CreationResultDTO),
         ("error-v1", ErrorDTO),
     ):
         (root / (name + ".json")).write_text(

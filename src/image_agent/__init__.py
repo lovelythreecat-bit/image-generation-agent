@@ -1,6 +1,6 @@
 """Standalone image creation core."""
 
-from .config import AgentConfig
+from .config import AgentConfig, ModelRoute, ServiceConfig
 from .contracts import (
     CreationRequestDTO,
     CreationResultDTO,
@@ -10,6 +10,7 @@ from .contracts import (
     request_from_dto,
     result_to_bundle,
 )
+from .execution import ExecutionPolicy
 from .models import (
     CreationRequest,
     CreationResult,
@@ -18,10 +19,12 @@ from .models import (
     MaterialInput,
     SelectionSpec,
 )
-from .pipeline import analyze_materials, create_images
+from .pipeline import accept_candidate, analyze_materials, create_images, resume_images
 
 __all__ = [
     "AgentConfig",
+    "ServiceConfig",
+    "ModelRoute",
     "CreationRequest",
     "CreationResult",
     "ImageSource",
@@ -30,6 +33,9 @@ __all__ = [
     "SelectionSpec",
     "analyze_materials",
     "create_images",
+    "resume_images",
+    "accept_candidate",
+    "ExecutionPolicy",
     "CreationRequestDTO",
     "CreationResultDTO",
     "ErrorDTO",

@@ -138,24 +138,35 @@ async def test_group_error_does_not_downgrade_assets(request_data):
 
     vision.audit_detail_set = fail
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert (
-        result.status == "succeeded" and result.detail_set_audits[0].error_info.kind == "protocol"
-    )
+    assert result.status == "partial" and result.detail_set_audits[0].error_info.kind == "protocol"
     assert result.detail_set_audits[0].distinctiveness is None
 
 
-async def test_quality_failure_partial_no_failed_image(request_data):
+async def test_quality_failure_partial_keeps_candidate_outside_approved_outputs(
+    request_data, tmp_path
+):
+    from image_agent.contracts import result_to_bundle
+    from image_agent.output import save_result
+
     request_data["output_types"] = ["main_image", "detail_page"]
     r, deps, vision, gen = setup(request_data, scores={"feature": [{"output_intent": 50}]})
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
     assert result.status == "partial" and result.error_info is None
     failed = result.assets[2]
     assert (
-        failed.image is None
+        failed.image is not None
         and failed.file_path is None
         and failed.error_info.code == "quality_failed"
     )
-    assert failed.error == failed.error_info.message and not result.detail_set_audits
+    assert failed.error == failed.error_info.message and not result.detail_set_audits[0].passed
+    await save_result(result, tmp_path)
+    assert (
+        tmp_path / "candidates/taobao.detail_page.feature/c0002.png"
+    ).read_bytes() == failed.image
+    assert not (tmp_path / "taobao/detail_page/feature.png").exists()
+    bundle = result_to_bundle(result)
+    assert failed.asset_id not in bundle.blobs
+    assert len(bundle.blobs) == 3
 
 
 async def test_staged_scene_failure_no_fusion(request_data):

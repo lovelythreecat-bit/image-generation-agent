@@ -17,6 +17,18 @@ Platform = Literal[
 ]
 OutputType = Literal["main_image", "detail_page", "pdd_white_background"]
 Presence = Literal["present", "absent", "not_applicable"]
+Verifiability = Literal["visible_appearance", "functional_claim", "unverified"]
+AssetStatus = Literal[
+    "succeeded",
+    "failed",
+    "pending_audit",
+    "audit_error",
+    "quality_failed",
+    "needs_input",
+    "budget_exhausted",
+    "accepted",
+    "generation_uncertain",
+]
 PLATFORMS = ("amazon", "taobao", "tmall", "jd", "pinduoduo", "shopee", "lazada", "shein", "temu")
 OUTPUTS = ("main_image", "detail_page", "pdd_white_background")
 
@@ -27,9 +39,14 @@ class Model(BaseModel):
     @field_validator("*", mode="after")
     @classmethod
     def sanitize_messages(cls, value, info):
-        if info.field_name in {"message", "reason", "error", "label", "code"} and isinstance(
-            value, str
-        ):
+        if info.field_name in {
+            "message",
+            "reason",
+            "model_reason",
+            "error",
+            "label",
+            "code",
+        } and isinstance(value, str):
             return redact(value)
         if info.field_name in {"warnings", "issues", "failed_checks"} and isinstance(value, list):
             return [redact(item) if isinstance(item, str) else item for item in value]
@@ -224,14 +241,27 @@ class MaterialObservation(Model):
 class Evidence(Model):
     material_id: Id
     observation: str = Field(min_length=1)
+    source_type: Literal["visual", "product_label", "promotional_text", "inference", "unknown"] = (
+        "unknown"
+    )
 
 
 class Fact(Model):
+    verifiability: Verifiability = "visible_appearance"
     fact_id: Id
     subject_id: Id | None
     description: str = Field(min_length=1)
     evidence: list[Evidence] = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
+
+    @property
+    def effective_verifiability(self):
+        """Legacy unknown provenance preserves existing appearance requirements."""
+        if self.verifiability != "visible_appearance":
+            return self.verifiability
+        if all(e.source_type in ("promotional_text", "inference") for e in self.evidence):
+            return "unverified"
+        return "visible_appearance"
 
 
 class Subject(Model):
@@ -499,6 +529,7 @@ class AssetTarget(Model):
 
 
 class Requirement(Model):
+    verifiability: Verifiability = "visible_appearance"
     target_kind: Literal["subject", "fact", "element", "constraint"]
     target_id: Id
     origin: Literal["default_identity", "user_required", "brief_required", "shot_rule", "preferred"]
@@ -599,6 +630,7 @@ class GarmentStructureAudit(Model):
 
 
 class QualityReport(GeneratedImageAudit):
+    model_reason: str = ""
     model_passed: bool
     original_subject_checks: list[SubjectCheck] = Field(default_factory=list)
     reviewed_subject_checks: list[SubjectCheck] = Field(default_factory=list)
@@ -645,7 +677,9 @@ class Asset(Model):
     platform: str
     output_type: str
     variant: str | None = None
-    status: Literal["succeeded", "failed"]
+    status: AssetStatus
+    candidates: list[dict] = Field(default_factory=list)
+    stop_reason: str | None = None
     image: bytes | None = Field(default=None, repr=False, exclude=True)
     file_path: str | None = None
     model: str
@@ -661,9 +695,11 @@ class Asset(Model):
 
 
 class CreationResult(Model):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "2.0"] = "2.0"
+    run_dir: str | None = None
+    usage: dict[str, int] = Field(default_factory=dict)
     request_id: str | None = None
-    status: Literal["succeeded", "partial", "failed", "needs_input"]
+    status: AssetStatus | Literal["partial"]
     presentation_mode: str = "product_only"
     style_prompt: str | None = None
     product_attributes: dict = Field(default_factory=dict)

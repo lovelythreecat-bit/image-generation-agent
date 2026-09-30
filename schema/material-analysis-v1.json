@@ -122,6 +122,18 @@
           "minLength": 1,
           "title": "Observation",
           "type": "string"
+        },
+        "source_type": {
+          "default": "unknown",
+          "enum": [
+            "visual",
+            "product_label",
+            "promotional_text",
+            "inference",
+            "unknown"
+          ],
+          "title": "Source Type",
+          "type": "string"
         }
       },
       "required": [
@@ -134,6 +146,16 @@
     "Fact": {
       "additionalProperties": false,
       "properties": {
+        "verifiability": {
+          "default": "visible_appearance",
+          "enum": [
+            "visible_appearance",
+            "functional_claim",
+            "unverified"
+          ],
+          "title": "Verifiability",
+          "type": "string"
+        },
         "fact_id": {
           "pattern": "^[A-Za-z0-9_-]{1,64}$",
           "title": "Fact Id",

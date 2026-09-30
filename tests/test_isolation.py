@@ -11,7 +11,6 @@ def test_runtime_import_boundaries():
     prohibited = {
         "mediaforge",
         "celery",
-        "langgraph",
         "langchain",
         "minio",
         "milvus",
@@ -63,10 +62,12 @@ def test_schema_files_are_current_and_external():
     root = Path(__file__).resolve().parents[1] / "schema"
     for name, model in (
         ("creation-request-v1", CreationRequestDTO),
-        ("creation-result-v1", CreationResultDTO),
+        ("creation-result-v2", CreationResultDTO),
         ("material-analysis-v1", MaterialAnalysis),
         ("error-v1", ErrorDTO),
     ):
         assert json.loads((root / (name + ".json")).read_text("utf-8")) == model.model_json_schema()
     request_schema = json.dumps(CreationRequestDTO.model_json_schema())
     assert '"output_dir"' not in request_schema and '"ImageSource"' not in request_schema
+    historical = json.loads((root / "creation-result-v1.json").read_text("utf-8"))
+    assert historical["properties"]["schema_version"]["const"] == "1.0"

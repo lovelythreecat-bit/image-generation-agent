@@ -1,4 +1,9 @@
-"""No server required: callers own authentication, media storage and blob URLs."""
+"""No server required: callers own authentication, media storage and blob URLs.
+
+Pass config=AgentConfig.from_file("examples/config.openai.json"), or read a deployment
+dict from your own database and pass AgentConfig.from_mapping(deployment_record).
+The DTO's image_model must select an alias provided by that configuration.
+"""
 
 import asyncio
 from pathlib import Path

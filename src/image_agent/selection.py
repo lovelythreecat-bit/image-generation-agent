@@ -185,7 +185,22 @@ def resolve_selection(request, analysis):
     )
     covered = {f for i in draft.pending_issues + draft.blocking_issues for f in i.fact_ids}
     for fact in analysis.facts:
-        if fact.fact_id in required_facts - covered and fact.confidence < 0.7:
+        if fact.fact_id not in required_facts:
+            continue
+        if fact.effective_verifiability == "functional_claim":
+            continue
+        if fact.effective_verifiability == "unverified":
+            draft.blocking_issues.append(
+                Issue(
+                    issue_id="evidence-" + fact.fact_id[:48],
+                    code="missing_evidence",
+                    resolution="reanalyze",
+                    message="必需外观缺少直接可验证证据，请补充素材并重新分析",
+                    fact_ids=[fact.fact_id],
+                )
+            )
+            continue
+        if fact.fact_id not in covered and fact.confidence < 0.7:
             draft.pending_issues.append(
                 Issue(
                     issue_id="confidence-" + fact.fact_id[:48],
@@ -269,6 +284,14 @@ def compile_element_plan(request, target, context, config):
     analysis, selection = context.analysis, context.selection
     subjects = {s.subject_id: s for s in analysis.subjects}
     elements = {e.element_id: e for e in analysis.elements}
+    facts_by_id = {f.fact_id: f for f in analysis.facts}
+
+    def claim_only(eid):
+        return all(
+            facts_by_id[fid].effective_verifiability == "functional_claim"
+            for fid in elements[eid].fact_ids
+        )
+
     required = list(selection.required_element_ids)
     preferred = list(selection.preferred_element_ids)
     excluded = list(selection.excluded_element_ids)
@@ -277,30 +300,53 @@ def compile_element_plan(request, target, context, config):
     for c in selection.constraints:
         if c.priority == "required" and c.kind != "exclusion":
             brief_required.update(c.element_ids)
-            required_subjects.update(c.subject_ids)
+            if not c.element_ids or not all(claim_only(eid) for eid in c.element_ids):
+                required_subjects.update(c.subject_ids)
     required = list(dict.fromkeys(required + [e for e in elements if e in brief_required]))
     preferred = [e for e in preferred if e not in required]
-    required_subjects.update(elements[e].subject_id for e in required if elements[e].subject_id)
+    required_subjects.update(
+        elements[e].subject_id for e in required if elements[e].subject_id and not claim_only(e)
+    )
     reasons = {e: "explicit exclusion" for e in excluded}
+
+    def environmental(eid):
+        element = elements[eid]
+        native_style = (
+            element.kind == "style"
+            and element.subject_id is not None
+            and all(
+                facts_by_id[fid].effective_verifiability == "visible_appearance"
+                and any(
+                    e.source_type in ("visual", "product_label") for e in facts_by_id[fid].evidence
+                )
+                for fid in element.fact_ids
+            )
+        )
+        return element.kind in ("scene", "style") and not native_style and not claim_only(eid)
+
     if strict_catalog(target):
-        if any(elements[e].kind in ("scene", "style") for e in required) or any(
+        if any(environmental(e) for e in required) or any(
             c.priority == "required" and c.kind == "atmosphere" for c in selection.constraints
         ):
             _conflict("必需场景/风格与平台白底规则冲突")
         for e in list(preferred):
-            if elements[e].kind in ("scene", "style"):
+            if environmental(e):
                 preferred.remove(e)
                 excluded.append(e)
                 reasons[e] = "platform catalog background"
     focus_candidates = [
         e
         for e in selection.focus_element_ids
-        if e in required + preferred and elements[e].kind in ("detail", "accessory", "identity")
+        if e in required + preferred
+        and not claim_only(e)
+        and elements[e].kind in ("detail", "accessory", "identity")
     ]
     focus_candidates += [
         e.element_id
         for e in analysis.elements
-        if e.element_id in required + preferred and e.kind == "detail"
+        if e.element_id in required + preferred
+        and e.kind == "detail"
+        and not claim_only(e.element_id)
     ]
     focus = next(iter(focus_candidates), None)
     if target.variant == "closeup" and focus is None:
@@ -313,7 +359,12 @@ def compile_element_plan(request, target, context, config):
         else ({focus_subject} if focus_subject else {selection.primary_subject_id})
         | required_subjects
     )
-    user_facts = {f for e in required for f in elements[e].fact_ids}
+    user_facts = {
+        f
+        for e in required
+        for f in elements[e].fact_ids
+        if facts_by_id[f].effective_verifiability != "functional_claim"
+    }
     if target.variant == "closeup" and (
         not user_facts <= set(elements[focus].fact_ids) or len(visible) > 1
     ):
@@ -337,8 +388,36 @@ def compile_element_plan(request, target, context, config):
         ],
     )
     reqs = {}
+    facts = {f.fact_id: f for f in analysis.facts}
+
+    def verifiability(kind, id):
+        if kind == "fact":
+            return facts[id].effective_verifiability
+        if kind == "element":
+            values = {facts[f].effective_verifiability for f in elements[id].fact_ids}
+            if values == {"functional_claim"}:
+                return "functional_claim"
+            if "unverified" in values:
+                return "unverified"
+        if kind == "constraint":
+            constraint = next(c for c in plan.constraints if c.constraint_id == id)
+            if (
+                constraint.kind != "exclusion"
+                and constraint.element_ids
+                and all(
+                    verifiability("element", e) == "functional_claim"
+                    for e in constraint.element_ids
+                )
+            ):
+                return "functional_claim"
+        return "visible_appearance"
 
     def add(kind, id, origin, app, reason):
+        verification = verifiability(kind, id)
+        if verification == "functional_claim":
+            app = "not_applicable"
+            reason = "Functional claim is not visually verifiable; never invent physical proof"
+
         key = (kind, id)
         previous = reqs.get(key)
         if (
@@ -348,7 +427,12 @@ def compile_element_plan(request, target, context, config):
         ):
             return
         reqs[key] = Requirement(
-            target_kind=kind, target_id=id, origin=origin, applicability=app, reason=reason
+            target_kind=kind,
+            target_id=id,
+            origin=origin,
+            applicability=app,
+            reason=reason,
+            verifiability=verification,
         )
 
     for sid in selection.subject_ids:
@@ -410,7 +494,13 @@ def compile_element_plan(request, target, context, config):
     plan.requirements = list(reqs.values())
     plan.required_fact_ids = list(
         dict.fromkeys(
-            [f for s in analysis.subjects if s.subject_id in visible for f in s.identity_fact_ids]
+            [
+                f
+                for s in analysis.subjects
+                if s.subject_id in visible
+                for f in s.identity_fact_ids
+                if facts[f].effective_verifiability == "visible_appearance"
+            ]
             + [
                 r.target_id
                 for r in plan.requirements
@@ -419,6 +509,17 @@ def compile_element_plan(request, target, context, config):
                 and r.origin != "preferred"
             ]
         )
+    )
+    plan.issues.extend(
+        Issue(
+            issue_id="claim-" + r.target_id[:48],
+            code="unverifiable_claim",
+            resolution="reanalyze",
+            message="功能声明无法由外观验证；不要求生成虚构结构或宣传文字",
+            fact_ids=[r.target_id],
+        )
+        for r in plan.requirements
+        if r.target_kind == "fact" and r.verifiability == "functional_claim"
     )
     _populate_references(
         plan,
@@ -556,11 +657,39 @@ def select_references(plan, analysis, materials, *, limit, reserve_stage=False):
 def bind_generation_references(plan, analysis, references):
     """Rebind an attempt's image numbers while retaining its frozen requirements."""
     rebound = plan.model_copy(deep=True)
-    previous = {b.material_id: b for b in plan.reference_bindings if b.material_id}
+    visible = {
+        r.target_id
+        for r in plan.requirements
+        if r.target_kind == "subject" and r.applicability != "not_applicable"
+    }
+    elements = [
+        e
+        for e in analysis.elements
+        if e.element_id in plan.required_element_ids + plan.preferred_element_ids
+        and (not e.subject_id or e.subject_id in visible)
+    ]
+    relevant_facts = set(plan.required_fact_ids) | {fid for e in elements for fid in e.fact_ids}
+    material_ids = {m.material_id for m in analysis.materials}
     bindings = []
     for index, reference in enumerate(references, 1):
         if reference.material_id:
-            binding = previous[reference.material_id].model_copy(update={"index": index})
+            if reference.material_id not in material_ids:
+                raise ProviderError("generation reference is not present in source analysis")
+            # An optional source may return after an earlier stage reserved its slot.
+            # Derive its evidence bindings from the frozen analysis, not the previous subset.
+            fact_ids = [
+                f.fact_id
+                for f in analysis.facts
+                if f.fact_id in relevant_facts
+                and any(e.material_id == reference.material_id for e in f.evidence)
+            ]
+            binding = ReferenceBinding(
+                index=index,
+                material_id=reference.material_id,
+                fact_ids=fact_ids,
+                element_ids=[e.element_id for e in elements if set(e.fact_ids) & set(fact_ids)],
+                role=reference.role,
+            )
         else:
             binding = ReferenceBinding(
                 index=index,

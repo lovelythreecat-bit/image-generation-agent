@@ -52,7 +52,7 @@ async def test_discovery_complete_response_and_source_quote(request_data):
         )
     ]
     with pytest.raises(ProviderError):
-        await VisionClient(ScriptTransport([data]), AgentConfig()).analyze_materials(
+        await VisionClient(ScriptTransport([data, data]), AgentConfig()).analyze_materials(
             CreationRequest(**request_data), materials()
         )
 

@@ -6,10 +6,24 @@ from pathlib import Path, PureWindowsPath
 
 from pydantic import ValidationError
 
+from .config import AgentConfig
 from .errors import AgentError, OutputError, make_error_info
 from .models import CreationRequest, ImageSource, MaterialAnalysis, MaterialInput
 from .output import atomic_write
-from .pipeline import analyze_materials, create_images
+from .pipeline import accept_candidate, analyze_materials, create_images, resume_images
+
+EXIT_CODES = {
+    "succeeded": 0,
+    "failed": 1,
+    "quality_failed": 1,
+    "partial": 2,
+    "needs_input": 3,
+    "accepted": 4,
+    "pending_audit": 5,
+    "audit_error": 5,
+    "budget_exhausted": 6,
+    "generation_uncertain": 7,
+}
 
 
 class Parser(argparse.ArgumentParser):
@@ -26,6 +40,7 @@ def parser():
         p.add_argument("--reference", action="append", default=[])
         p.add_argument("--material", action="append", default=[])
         p.add_argument("--request-json")
+        p.add_argument("--config", help="Deployment API configuration JSON file")
         p.add_argument("--media-map")
         p.add_argument("--media-root")
         p.add_argument("--name")
@@ -44,6 +59,18 @@ def parser():
         p.add_argument("--out", required=True)
         if command == "create":
             p.add_argument("--analysis")
+            p.add_argument("--max-image-calls", type=int)
+            p.add_argument("--max-vision-calls", type=int)
+    resume = subs.add_parser("resume", help="Continue a persisted v2 task")
+    resume.add_argument("run_dir", type=Path)
+    resume.add_argument("--config", help="Current deployment configuration; keys are not persisted")
+    accept = subs.add_parser(
+        "accept", help="Explicitly accept a saved candidate without approving it"
+    )
+    accept.add_argument("run_dir", type=Path)
+    accept.add_argument("--asset", required=True)
+    accept.add_argument("--candidate", required=True)
+    accept.add_argument("--reason", required=True)
     return root
 
 
@@ -137,9 +164,20 @@ def request_from_args(args):
 def run_cli(argv=None):
     try:
         args = parser().parse_args(argv)
+        if args.command == "accept":
+            reason = args.reason.strip()
+            if not reason:
+                raise AgentError("人工接受必须填写原因")
+            result = asyncio.run(
+                accept_candidate(args.run_dir, args.asset, args.candidate, reason=reason)
+            )
+            return print_result(result)
+        config_args = {"config": AgentConfig.from_file(args.config)} if args.config else {}
+        if args.command == "resume":
+            return print_result(asyncio.run(resume_images(args.run_dir, **config_args)))
         request = request_from_args(args)
         if args.command == "analyze":
-            analysis = asyncio.run(analyze_materials(request))
+            analysis = asyncio.run(analyze_materials(request, **config_args))
             directory = Path(args.out)
             directory.mkdir(parents=True, exist_ok=True)
             atomic_write(
@@ -154,24 +192,16 @@ def run_cli(argv=None):
             if args.analysis
             else None
         )
-        result = asyncio.run(create_images(request, analysis=analysis))
-        for asset in result.assets:
-            print(
-                f"{asset.platform} {asset.output_type} {asset.variant or '-'} {asset.status} {asset.file_path or ''}"
-            )
-            if asset.error:
-                print(asset.error)
-        for issue in result.issues:
-            print(issue.code + ": " + issue.message)
-            for option in issue.options:
-                print(f"  {option.id}: {option.label}")
-        if result.error_info:
-            print(result.error_info.message)
-        return (
-            1
-            if result.output_errors
-            else {"succeeded": 0, "partial": 2, "failed": 1, "needs_input": 3}[result.status]
-        )
+        policy_fields = {
+            key: getattr(args, key)
+            for key in ("max_image_calls", "max_vision_calls")
+            if getattr(args, key) is not None
+        }
+        if policy_fields:
+            from .execution import ExecutionPolicy
+
+            config_args["policy"] = ExecutionPolicy(**policy_fields)
+        return print_result(asyncio.run(create_images(request, analysis=analysis, **config_args)))
     except SystemExit as error:
         return 0 if error.code == 0 else 1
     except KeyboardInterrupt:
@@ -182,6 +212,31 @@ def run_cli(argv=None):
     except (OSError, json.JSONDecodeError):
         print(make_error_info(OutputError("无法读取或写入 CLI 文件")).message, file=sys.stderr)
         return 1
+
+
+def print_result(result):
+    print("result: " + result.status)
+    if result.run_dir:
+        print("run_dir: " + str(result.run_dir))
+    for asset in result.assets:
+        print(
+            f"{asset.platform} {asset.output_type} {asset.variant or '-'} {asset.status} {asset.file_path or ''}"
+        )
+        if asset.stop_reason:
+            print("stop_reason: " + asset.stop_reason)
+        if asset.error:
+            print(asset.error)
+        for candidate in asset.candidates:
+            print(
+                f"  candidate {candidate['candidate_id']} attempt={candidate.get('index', '-')} {candidate.get('status', '')}"
+            )
+    for issue in result.issues:
+        print(issue.code + ": " + issue.message)
+        for option in issue.options:
+            print(f"  {option.id}: {option.label}")
+    if result.error_info:
+        print(result.error_info.message)
+    return 1 if result.output_errors else EXIT_CODES[result.status]
 
 
 def main():

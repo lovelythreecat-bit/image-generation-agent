@@ -77,6 +77,7 @@ async def test_public_api_real_vision_generator_and_snapshot(request_data, monke
     analysis = await analyze_materials(r, cfg)
     assert len(calls) == 1 and analysis.status == "ready"
     r.output_dir = tmp_path
+    r.request_id = "create"
     result = await create_images(r, cfg, analysis=analysis)
     assert result.status == "succeeded" and len(calls) == 4
     assert result.assets[0].image == picture((1600, 1600))
@@ -87,7 +88,9 @@ async def test_public_api_real_vision_generator_and_snapshot(request_data, monke
     assert len(calls) == 4
 
 
-async def test_public_cancel_generation_leaves_no_files(request_data, monkeypatch, tmp_path):
+async def test_public_cancel_generation_retains_recovery_journal(
+    request_data, monkeypatch, tmp_path
+):
     entered, release = asyncio.Event(), asyncio.Event()
     calls, clients = mock_provider(monkeypatch, gate=(entered, release))
     request_data["materials"][0]["source"] = {"data": picture()}
@@ -97,7 +100,20 @@ async def test_public_cancel_generation_leaves_no_files(request_data, monkeypatc
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert (tmp_path / "create").is_dir() and list((tmp_path / "create").iterdir()) == []
+    directories = list(tmp_path.iterdir())
+    assert len(directories) == 1
+    directory = directories[0]
+    assert (directory / "run.json").is_file()
+    assert (directory / "state.json").is_file()
+    assert (directory / "checkpoints.sqlite").is_file()
+    assert list((directory / "inputs").iterdir())
+    journal = json.loads((directory / "operations.json").read_text("utf-8"))
+    assert next(iter(journal.values()))["status"] == "submitted"
+    from image_agent import resume_images
+
+    before = len(calls)
+    result = await resume_images(directory, AgentConfig(openrouter_api_key="mock-only"))
+    assert result.status == "generation_uncertain" and len(calls) == before
     assert all(c.is_closed for c in clients)
 
 

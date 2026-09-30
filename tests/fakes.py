@@ -24,9 +24,16 @@ def analysis_data():
         "facts": [
             {
                 "fact_id": "f1",
+                "verifiability": "visible_appearance",
                 "subject_id": "s1",
                 "description": "white ceramic cup",
-                "evidence": [{"material_id": "m1", "observation": "white cup visible"}],
+                "evidence": [
+                    {
+                        "material_id": "m1",
+                        "observation": "white cup visible",
+                        "source_type": "visual",
+                    }
+                ],
                 "confidence": 0.95,
             }
         ],

@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "image-agent 结构",
+    "locale": "zh-CN",
+    "output": "image-agent-structure.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "创作主路径",
+        "focus": ["caller", "api", "pipeline", "generator", "transport", "openrouter"],
+        "note": "从调用方进入 create_images，经生图客户端到达 OpenRouter。"
+      },
+      {
+        "id": "discover-select",
+        "label": "发现与选择",
+        "focus": ["pipeline", "images", "vision", "selection", "prompt"],
+        "note": "加载素材后做一次视觉发现，再解析选择并编译提示词。"
+      },
+      {
+        "id": "review-output",
+        "label": "审核与落盘",
+        "focus": ["pipeline", "quality", "vision", "output"],
+        "note": "像素与审核门槛未过时，同一资产至多修复一次，可选写入目录。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "调用方",
+      "sublabel": "Python · CLI",
+      "pos": [20, 250],
+      "size": [140, 72]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "公共 API",
+      "sublabel": "models · contracts",
+      "pos": [208, 250],
+      "size": [152, 72]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Pipeline",
+      "sublabel": "run_pipeline",
+      "tag": "请求内串行",
+      "pos": [408, 242],
+      "size": [172, 88]
+    },
+    {
+      "id": "generator",
+      "type": "backend",
+      "label": "ImageGenerator",
+      "sublabel": "POST /images",
+      "pos": [628, 250],
+      "size": [168, 72]
+    },
+    {
+      "id": "transport",
+      "type": "backend",
+      "label": "HttpTransport",
+      "sublabel": "httpx · 3 次重试",
+      "pos": [864, 250],
+      "size": [164, 72]
+    },
+    {
+      "id": "openrouter",
+      "type": "cloud",
+      "label": "OpenRouter",
+      "sublabel": "api/v1",
+      "tag": "Bearer",
+      "pos": [1076, 250],
+      "size": [156, 72]
+    },
+    {
+      "id": "vision",
+      "type": "backend",
+      "label": "VisionClient",
+      "sublabel": "chat/completions",
+      "pos": [408, 40],
+      "size": [172, 72]
+    },
+    {
+      "id": "images",
+      "type": "backend",
+      "label": "素材加载",
+      "sublabel": "path · URL · bytes",
+      "pos": [208, 500],
+      "size": [152, 72]
+    },
+    {
+      "id": "selection",
+      "type": "backend",
+      "label": "选择编译",
+      "sublabel": "fingerprint · 证据",
+      "pos": [408, 500],
+      "size": [172, 72]
+    },
+    {
+      "id": "prompt",
+      "type": "backend",
+      "label": "提示词与平台",
+      "sublabel": "prompt · platforms",
+      "pos": [628, 500],
+      "size": [168, 72]
+    },
+    {
+      "id": "quality",
+      "type": "backend",
+      "label": "质量门禁",
+      "sublabel": "像素 · 审核门槛",
+      "pos": [864, 500],
+      "size": [164, 72]
+    },
+    {
+      "id": "output",
+      "type": "backend",
+      "label": "结果落盘",
+      "sublabel": "默认不写文件",
+      "pos": [1076, 500],
+      "size": [156, 72]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "image-agent 包",
+      "wraps": ["api", "pipeline", "vision", "images", "selection", "prompt", "generator", "quality", "transport", "output"]
+    }
+  ],
+  "connections": [
+    { "id": "caller-to-api", "from": "caller", "to": "api", "label": "请求", "variant": "emphasis" },
+    { "id": "api-to-pipeline", "from": "api", "to": "pipeline", "label": "编排", "variant": "emphasis" },
+    { "id": "pipeline-to-generator", "from": "pipeline", "to": "generator", "label": "生图", "variant": "emphasis" },
+    { "id": "generator-to-transport", "from": "generator", "to": "transport", "label": "/images", "variant": "emphasis" },
+    { "id": "transport-to-openrouter", "from": "transport", "to": "openrouter", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "pipeline-to-vision", "from": "pipeline", "to": "vision", "label": "发现与审核" },
+    { "id": "vision-to-transport", "from": "vision", "to": "transport", "label": "JSON", "fromSide": "right", "toSide": "top", "via": [[946, 76]] },
+    { "id": "pipeline-to-images", "from": "pipeline", "to": "images", "label": "加载" },
+    { "id": "pipeline-to-selection", "from": "pipeline", "to": "selection", "label": "选择", "fromSide": "bottom", "toSide": "top", "labelAt": [452, 360] },
+    { "id": "pipeline-to-prompt", "from": "pipeline", "to": "prompt", "label": "文案" },
+    { "id": "pipeline-to-quality", "from": "pipeline", "to": "quality", "label": "门槛", "fromSide": "bottom", "toSide": "top" },
+    { "id": "pipeline-to-output", "from": "pipeline", "to": "output", "label": "可选落盘", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "入口",
+      "items": [
+        "Python 调用 analyze_materials 与 create_images",
+        "CLI 为 image-agent analyze / create",
+        "第三方 JSON 走 CreationRequestDTO 与 schema v1"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "编排",
+      "items": [
+        "先加载素材，再做一次视觉发现",
+        "选择快照 fingerprint 规则为 multi-image-r2",
+        "逐资产编译证据并生图，质量失败至多修复一次"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "模型访问",
+      "items": [
+        "VisionClient 调用 POST /chat/completions",
+        "ImageGenerator 调用 POST /images",
+        "仅对 429/502/503/504 与连接错误重试，共 3 次"
+      ]
+    }
+  ]
+}

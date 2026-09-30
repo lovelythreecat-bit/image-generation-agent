@@ -2,7 +2,12 @@ from .models import ComplianceResult
 from .platforms import generation_instruction
 from .prompt import STRUCTURED_MARKER, scene_hint, strict_catalog
 
-REF_WATERMARK_SUFFIX = " Do not copy, reproduce, or recreate any text, watermark, logo, icon, badge, price tag, or graphic overlay visible in the reference image. Generate clean original imagery with no embedded text."
+REF_WATERMARK_SUFFIX = (
+    " Preserve physical product labels, trademarks, printed numbers, patterns and artwork "
+    "that belong to the actual product; these are identity evidence. Remove only peripheral "
+    "promotional overlays, seller watermarks, added price tags and platform badges. "
+    "Do not invent new advertising text. Product-native markings are not promotional overlays."
+)
 
 
 def apply_compliance(request, target, prompt):
@@ -10,10 +15,6 @@ def apply_compliance(request, target, prompt):
     if any(k in lowered for k in ("bomb", "weapon", "drug", "counterfeit", "fake", "replica")):
         return ComplianceResult(blocked=True, prompt=prompt)
     natural, marker, structured = prompt.partition(STRUCTURED_MARKER)
-    for old, new in {"CN": {"4": "6"}, "VN": {"4": "6"}, "PH": {"13": "12"}}.get(
-        request.market, {}
-    ).items():
-        natural = natural.replace(old, new)
     warnings = [
         f"品牌/IP 关键词需人工确认授权: {k}"
         for k in ("nike", "adidas", "gucci", "chanel", "disney", "marvel", "pokemon")

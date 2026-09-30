@@ -42,7 +42,10 @@ async def smoke():
                 "fact_id": "f1",
                 "subject_id": "s1",
                 "description": "white cup",
-                "evidence": [{"material_id": "m1", "observation": "white cup"}],
+                "verifiability": "visible_appearance",
+                "evidence": [
+                    {"material_id": "m1", "observation": "white cup", "source_type": "visual"}
+                ],
                 "confidence": 1,
             }
         ],

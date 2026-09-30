@@ -10,3 +10,5 @@ dist/
 *.egg-info/
 .env
 out/
+examples/秘钥.md
+examples/密钥.md

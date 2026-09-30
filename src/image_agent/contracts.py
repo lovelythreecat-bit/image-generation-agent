@@ -9,6 +9,7 @@ from .errors import AgentError, make_error_info
 from .images import image_format
 from .models import (
     AssetElementPlan,
+    AssetStatus,
     CreationRequest,
     CreationResult,
     DetailSetAudit,
@@ -83,12 +84,23 @@ class CreationRequestDTO(Model):
         return self
 
 
+class CandidateDTO(Model):
+    """Review metadata only; local storage references never cross the DTO boundary."""
+
+    candidate_id: str
+    index: int
+    status: str
+    quality: QualityReport | None = None
+    error_info: ErrorInfo | None = None
+    repair_prompt: str | None = None
+
+
 class AssetDTO(Model):
     asset_id: str
     platform: str
     output_type: str
     variant: str | None = None
-    status: Literal["succeeded", "failed"]
+    status: AssetStatus
     blob_id: str | None = None
     mime_type: str | None = None
     byte_length: int | None = None
@@ -102,12 +114,15 @@ class AssetDTO(Model):
     element_checks: list[ElementCheck] = Field(default_factory=list)
     reference_bindings: list[ReferenceBinding] = Field(default_factory=list)
     attempts: list[GenerationAttempt] = Field(default_factory=list)
+    candidates: list[CandidateDTO] = Field(default_factory=list)
+    stop_reason: str | None = None
 
 
 class CreationResultDTO(Model):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "2.0"] = "2.0"
     request_id: str | None = None
-    status: Literal["succeeded", "partial", "failed", "needs_input"]
+    status: Literal["partial"] | AssetStatus
+    usage: dict = Field(default_factory=dict)
     presentation_mode: str
     style_prompt: str | None = None
     product_attributes: dict
@@ -150,7 +165,11 @@ def result_to_bundle(result: CreationResult) -> ResultBundle:
     blobs = {}
     assets = []
     for asset in result.assets:
-        data = asset.model_dump(exclude={"image", "file_path"})
+        data = asset.model_dump(exclude={"image", "file_path", "candidates"})
+        data["candidates"] = [
+            {key: value for key, value in candidate.items() if key in CandidateDTO.model_fields}
+            for candidate in asset.candidates
+        ]
         if asset.status == "succeeded" and asset.image is not None:
             if asset.asset_id in blobs:
                 raise AgentError("duplicate result asset_id")
@@ -161,7 +180,7 @@ def result_to_bundle(result: CreationResult) -> ResultBundle:
                 byte_length=len(asset.image),
             )
         assets.append(AssetDTO(**data))
-    dto = CreationResultDTO(**result.model_dump(exclude={"assets"}), assets=assets)
+    dto = CreationResultDTO(**result.model_dump(exclude={"assets", "run_dir"}), assets=assets)
     return ResultBundle(dto=dto, blobs=blobs)
 
 

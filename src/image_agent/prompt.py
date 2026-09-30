@@ -143,7 +143,7 @@ _CATEGORY_FAMILIES = {
 SHOTS = {
     "hero": "Hero product shot, full product clearly visible and centered, studio-grade lighting with soft shadows, crisp focus on the product, uncluttered background, premium e-commerce look",
     "scene": "Lifestyle scene shot, visibly different from the main catalog image: show the product in a credible furnished environment with at least two readable contextual elements, not a plain seamless studio wall. For model-wear apparel, use a natural three-quarter or full-body walking, turning or interacting pose from a different camera angle while keeping the garment readable. Use soft natural light, depth and an aspirational mood",
-    "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize one source-supported benefit such as fit, silhouette, drape or construction through the model pose and camera angle. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for later marketing copy but generate no text, labels or invented callouts",
+    "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize one source-supported benefit such as fit, silhouette, drape or construction through the model pose and camera angle. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for later marketing copy but generate no added promotional text, labels or invented callouts; preserve product-native labels and artwork",
     "closeup": "Macro close-up detail shot: crop tightly into one detail visibly supported by the source image, such as neckline, stitching, texture or construction. Use sharp focus and soft side light; do not invent fabric texture, labels or components that cannot be verified",
 }
 
@@ -299,5 +299,114 @@ def build_stage_prompt(request, target, plan, final_prompt):
         + STRUCTURED_MARKER
         + json.dumps(
             {"subject_slots": plan.subject_ids, "presentation": plan.subject_presentations}
+        )
+    )
+
+
+REPAIR_MARKER = "\nTARGETED REPAIR FEEDBACK:\n"
+
+
+def build_repair_prompt(request, target, context, plan, quality, *, previous_prompt=""):
+    """Repair only failures of applicable frozen requirements using their audit evidence."""
+    failures = []
+    preserve = []
+    for requirement in plan.requirements:
+        if requirement.applicability == "not_applicable":
+            continue
+        kind = requirement.target_kind
+        checks = getattr(quality, kind + "_checks")
+        check = next(c for c in checks if getattr(c, kind + "_id") == requirement.target_id)
+        if kind == "subject":
+            failed = not check.same_product or check.score < 85
+            action = "Restore the exact source silhouette, proportions, markings and construction for this subject."
+        elif kind in ("fact", "element"):
+            failed = requirement.origin != "preferred" and (
+                (requirement.applicability == "must_show" and check.presence != "present")
+                or (check.presence == "present" and check.fidelity_score < 85)
+            )
+            action = "Restore this verified visible detail from the original evidence without inventing components."
+        else:
+            failed = requirement.applicability == "must_show" and not check.satisfied
+            action = "Implement the specified placement, appearance or exclusion while preserving product identity."
+        row = {"kind": kind, "id": requirement.target_id, "check": check.model_dump()}
+        if failed:
+            row.update(action=action, requirement=requirement.model_dump())
+            failures.append(row)
+        elif kind not in ("fact", "element") or check.presence == "present":
+            preserve.append(row)
+    metrics = [
+        (
+            "visual_quality",
+            70,
+            "Correct blur, lighting, artifacts or composition identified by the audit.",
+        ),
+        (
+            "platform_compliance",
+            70,
+            "Correct the specified platform background, framing or promotional overlay defect.",
+        ),
+        (
+            "output_intent",
+            75,
+            "Restore the requested shot role and framing without changing product details.",
+        ),
+    ]
+    if target.presentation_mode == "model_wear":
+        metrics.append(
+            (
+                "garment_fusion",
+                80,
+                "Correct garment contact, folds and occlusion while preserving source construction.",
+            )
+        )
+        if target.model_preference != "auto":
+            metrics.append(
+                (
+                    "model_preference",
+                    80,
+                    "Honor the requested model preference while preserving the garment and framing.",
+                )
+            )
+    for name, threshold, action in metrics:
+        score = getattr(quality, name)
+        if score < threshold:
+            failures.append(
+                {
+                    "metric": name,
+                    "score": score,
+                    "threshold": threshold,
+                    "reason": quality.reason,
+                    "action": action,
+                }
+            )
+    if not quality.deterministic_checks.passed:
+        failures.append(
+            {
+                "metric": "pixels",
+                "check": quality.deterministic_checks.model_dump(),
+                "action": "Correct the reported dimensions, aspect ratio or white border without redesigning the product.",
+            }
+        )
+    base = build_prompt(request, target, context, plan)
+    # A previous structured prompt has obsolete image indices and already includes
+    # the request directions. Rebuild it; retain only standalone caller guidance.
+    if previous_prompt and STRUCTURED_MARKER not in previous_prompt:
+        guidance = previous_prompt.partition(REPAIR_MARKER)[0].strip()
+        if guidance:
+            base += "\nPrevious composition guidance: " + guidance
+    return (
+        base
+        + REPAIR_MARKER
+        + (
+            "Use original source materials as the sole authority for product identity. "
+            "Use the previous candidate only to locate the reported errors; it must never replace original identity evidence. "
+            "If the previous candidate is unavailable as an image, use this written audit feedback only. "
+            "Preserve already-correct product details, native labels/artwork, layout and other passing requirements. "
+            "Do not add structures or promotional text to demonstrate unverified functional claims. "
+            "Change only the listed failed objects/metrics and retain the requested shot.\n"
+            + json.dumps(
+                {"failures": failures, "preserve": preserve, "model_reason": quality.model_reason},
+                ensure_ascii=False,
+            )
         )
     )

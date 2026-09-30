@@ -58,7 +58,8 @@ async def test_identity_and_intent_repair_modes(request_data, scores, expected_c
     assert result.assets[0].generation_mode == mode
     if mode == "staged":
         assert not any(ref.role == "identity" for ref in gen.calls[1]["references"])
-        assert gen.calls[2]["references"][-1].stage_id == "stage"
+        assert any(ref.stage_id == "stage" for ref in gen.calls[2]["references"])
+        assert gen.calls[2]["references"][-1].stage_id == "previous-candidate"
 
 
 async def test_quality_service_failure_no_creative_retry(request_data):
@@ -68,9 +69,35 @@ async def test_quality_service_failure_no_creative_retry(request_data):
         request_data, scores={"main": [ProviderError("timeout", kind="transport")]}
     )
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert result.status == "failed" and len(gen.calls) == 1
-    assert result.assets[0].image is None and result.assets[0].error_info.retryable
+    assert result.status == "audit_error" and len(gen.calls) == 1
+    assert result.assets[0].image == picture((1600, 1600))
+    assert result.assets[0].error_info.retryable
     assert result.error_info is None
+
+
+async def test_audit_protocol_failure_preserves_candidate_and_saved_manifest(
+    request_data, tmp_path
+):
+    import json
+
+    from image_agent.contracts import result_to_bundle
+    from image_agent.output import save_result
+    from image_agent.pipeline import run_pipeline
+
+    r, deps, vision, gen = setup(
+        request_data, scores={"main": [ProviderError("audit_image: fact_checks missing")]}
+    )
+    result = await run_pipeline(r, AgentConfig(), dependencies=deps)
+    saved = await save_result(result, tmp_path)
+    asset = saved.assets[0]
+    assert saved.status == asset.status == "audit_error"
+    assert len(gen.calls) == 1 and asset.image == picture((1600, 1600))
+    assert (tmp_path / "candidates/taobao.main_image.default/c0001.png").read_bytes() == asset.image
+    assert not (tmp_path / "taobao/main_image.png").exists()
+    manifest = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert manifest["assets"][0]["file_path"] == "candidates/taobao.main_image.default/c0001.png"
+    assert manifest["assets"][0]["status"] == "audit_error"
+    assert not result_to_bundle(saved).blobs
 
 
 async def test_snapshot_recovery_and_stale_detection(request_data):

@@ -1,0 +1,21 @@
+{
+  "http_proxy": "http://127.0.0.1:7890",
+  "services": {
+    "official_images": {
+      "base_url": "https://penguinapi.vip/v1",
+      "protocol": "openai_images",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "official_vision": {
+      "base_url": "https://penguinapi.vip/v1",
+      "protocol": "chat_completions",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  },
+  "image_models": {
+    "fast": {"service": "official_images", "model": "gpt-image-2"}
+  },
+  "stages": {
+    "vision": {"service": "official_vision", "model": "gpt-5.5"}
+  }
+}

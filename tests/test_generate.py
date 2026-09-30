@@ -104,3 +104,39 @@ async def test_payload_order_and_capacity():
         )
     assert error.value.code == "reference_capacity_exceeded"
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "value, reason",
+    [
+        ("", "empty"),
+        (23, "non_string"),
+        ("data:image/png;base64,aW1hZ2U=", "data_url"),
+        ("aW1h\nZ2U=", "whitespace"),
+        ("https://private.example/result?token=secret-value", "remote_url"),
+        ("%%%sensitive-response%%%", "invalid_encoding"),
+        ("aW1hZ2U", "invalid_encoding"),
+    ],
+)
+def test_decode_failure_reports_shape_without_echoing_response(value, reason):
+    from image_agent.generate import extract_image_bytes
+
+    with pytest.raises(ProviderError) as error:
+        extract_image_bytes({"data": [{"b64_json": value}]})
+    message = str(error.value)
+    assert "data[0].b64_json" in message
+    assert reason in message
+    assert "secret-value" not in message and "sensitive-response" not in message
+    assert "aW1h" not in message
+    if isinstance(value, str):
+        assert f"chars={len(value)}" in message
+
+
+def test_url_only_response_is_identified_without_downloading_or_echoing_url():
+    from image_agent.generate import extract_image_bytes
+
+    with pytest.raises(ProviderError) as error:
+        extract_image_bytes({"data": [{"b64_json": None, "url": "https://private/secret"}]})
+    assert "data[0].url" in str(error.value)
+    assert "remote_url" in str(error.value)
+    assert "private" not in str(error.value)

@@ -1,4 +1,6 @@
 import io
+import json
+from collections import Counter
 
 from PIL import Image
 
@@ -28,7 +30,9 @@ def check_pixels(data, target, size, model):
             reasons.append("白底必须480×480且小于3 MiB")
     else:
         minimum = (
-            768 if model == "openai/gpt-image-2" else {"1K": 768, "2K": 1536, "4K": 3000}[size]
+            768
+            if model in {"openai/gpt-image-2", "gpt-image-2"}
+            else {"1K": 768, "2K": 1536, "4K": 3000}[size]
         )
         if max(w, h) < minimum:
             reasons.append(f"长边不足{minimum}")
@@ -61,7 +65,15 @@ def check_pixels(data, target, size, model):
 def validate_check_ids(checks, expected, key):
     ids = [getattr(c, key) for c in checks]
     if len(ids) != len(set(ids)) or set(ids) != set(expected):
-        raise ProviderError(f"audit {key} IDs are missing, duplicated or unknown")
+        details = {
+            "missing": sorted(set(expected) - set(ids)),
+            "duplicated": sorted(i for i, count in Counter(ids).items() if count > 1),
+            "unknown": sorted(set(ids) - set(expected)),
+        }
+        raise ProviderError(
+            f"audit {key} IDs are missing, duplicated or unknown: "
+            + "; ".join(f"{name}={json.dumps(values)}" for name, values in details.items())
+        )
 
 
 def review_subject_ids(audit, plan):
@@ -138,9 +150,12 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
         reviewed_subject_checks=reviewed,
         passed=not failed,
         model_passed=audit.passed,
+        model_reason=audit.reason,
         deterministic_checks=pixels,
         failed_checks=failed,
-        reason="未通过指标：" + "；".join(failed) if failed else "通过",
+        reason=("未通过指标：" + "；".join(failed) + "；审核依据：" + audit.reason)
+        if failed
+        else "通过",
     )
 
 
@@ -156,14 +171,10 @@ def choose_retry(target, quality, plan=None):
         if plan
         else {s.subject_id for s in quality.subject_checks}
     )
-    if (
-        any(
-            (s.score < 85 or not s.same_product)
-            for s in quality.subject_checks
-            if s.subject_id in applicable
-        )
-        or quality.garment_fusion < 80
-        or any(w in quality.reason for w in ("融合", "穿着", "人体", "贴合", "服装", "上身"))
-    ):
+    if any(
+        (s.score < 85 or not s.same_product)
+        for s in quality.subject_checks
+        if s.subject_id in applicable
+    ) or (target.presentation_mode == "model_wear" and quality.garment_fusion < 80):
         return "staged"
     return "strict"

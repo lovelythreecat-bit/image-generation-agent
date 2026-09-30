@@ -35,13 +35,39 @@ async def test_original_jpeg_relative_manifest_and_exclusive_directory(request_d
     original = result()
     saved = await save_result(original, directory)
     assert saved.assets[0].file_path.endswith(".jpg")
-    assert (directory / "taobao/main_image.jpg").read_bytes() == original.assets[0].image
+    assert (directory / "approved/taobao/main_image/default.jpg").read_bytes() == original.assets[
+        0
+    ].image
     manifest = json.loads((directory / "result.json").read_text("utf-8"))
     assert (
         manifest["assets"][0]["image"]
         == manifest["assets"][0]["file_path"]
-        == "taobao/main_image.jpg"
+        == "approved/taobao/main_image/default.jpg"
     )
+
+
+def test_unnamed_runs_reserve_separate_directories(request_data, tmp_path):
+    from image_agent.output import reserve_output
+
+    request = CreationRequest(**(request_data | dict(output_dir=tmp_path)))
+    first = reserve_output(request)
+    (first / "keep.txt").write_text("previous run", encoding="utf-8")
+    second = reserve_output(request)
+    assert first != second
+    assert first.parent == second.parent == tmp_path.resolve()
+    assert second.is_dir()
+    assert (first / "keep.txt").read_text("utf-8") == "previous run"
+
+
+async def test_missing_key_does_not_reserve_output(request_data, tmp_path):
+    from image_agent import AgentConfig, create_images
+    from image_agent.errors import ConfigurationError
+
+    root = tmp_path / "out"
+    request = CreationRequest(**(request_data | dict(output_dir=root, request_id="retry")))
+    with pytest.raises(ConfigurationError):
+        await create_images(request, config=AgentConfig())
+    assert not root.exists()
 
 
 async def test_image_write_error_keeps_bytes_and_structured_error(tmp_path, monkeypatch):
