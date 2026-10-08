@@ -3,6 +3,7 @@
 import json
 import re
 
+from .appearance import PRODUCT_APPEARANCE_POLICY, SOURCE_VIEW_POLICY
 from .marketing import MARKETING_POLICY, user_directions
 from .models import AssetTarget
 from .platforms import aspect_ratio_for
@@ -143,7 +144,7 @@ _CATEGORY_FAMILIES = {
 }
 SHOTS = {
     "hero": "Hero product shot, full product clearly visible and centered, studio-grade lighting with soft shadows, crisp focus on the product, uncluttered background, premium e-commerce look",
-    "scene": "Lifestyle scene shot, visibly different from the main catalog image: show the product in a credible furnished environment with at least two readable contextual elements, not a plain seamless studio wall. For model-wear apparel, use a natural three-quarter or full-body walking, turning or interacting pose from a different camera angle while keeping the garment readable. Use soft natural light, depth and an aspirational mood",
+    "scene": "Lifestyle scene shot, visibly different from the main catalog image through setting, lighting and composition: show the product in a credible furnished environment with at least two readable contextual elements, not a plain seamless studio wall. For model-wear apparel, use a natural three-quarter or full-body walking or interacting pose that preserves a source-supported product view while keeping the garment readable. Use soft natural light, depth and an aspirational mood",
     "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize the user's requested selling point through composition, pose and requested marketing copy. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for marketing copy, and include promotional text, labels or callouts when requested by the user; preserve product-native labels and artwork",
     "closeup": "Macro close-up detail shot: crop tightly into one detail visibly supported by the source image, such as neckline, stitching, texture or construction. Use sharp focus and soft side light; do not invent fabric texture, labels or components that cannot be verified",
 }
@@ -219,6 +220,8 @@ def build_targets(request, presentation_mode):
 def build_prompt(request, target, context, plan, mode="standard"):
     parts = [
         f"Create a high-quality e-commerce photo of the selected source products. The declared product is {request.product_name}, category {request.category}. Do not change category, silhouette, construction, color, material, pattern, proportions or distinctive details. Never substitute the products from scene/style references.",
+        PRODUCT_APPEARANCE_POLICY,
+        SOURCE_VIEW_POLICY,
         MARKETING_POLICY,
         user_directions(request),
     ]
@@ -280,7 +283,7 @@ def build_prompt(request, target, context, plan, mode="standard"):
         parts.append(
             {
                 "scene": "Show a credible environment.",
-                "feature": "Do not repeat a front catalog portrait.",
+                "feature": "Use tighter framing, composition and copy to emphasize the selling point within a source-supported product view.",
                 "closeup": "Use true macro framing, not a full body view.",
             }.get(target.variant, "Keep complete products visible.")
         )
@@ -314,6 +317,9 @@ def build_stage_prompt(request, target, plan, final_prompt):
     return (
         "Create only a scene and natural pose template. Leave product regions empty for later fusion. "
         "Do not draw or copy product identities. Reserve space for the required subjects. "
+        "Keep product-slot orientation flexible so final fusion can adapt the pose to a "
+        "source-supported product view, including supported side or rear views. Do not require "
+        "a turn or new product angle merely for creative variety. "
         f"Shot: {target.variant or 'hero'}. Style: {request.style_hint or ''}. "
         + STRUCTURED_MARKER
         + json.dumps(
@@ -337,7 +343,12 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
         check = next(c for c in checks if getattr(c, kind + "_id") == requirement.target_id)
         if kind == "subject":
             failed = not check.same_product or check.score < 85
-            action = "Restore the exact source silhouette, proportions, markings and construction for this subject."
+            action = (
+                "Restore the exact source silhouette, proportions, markings and construction for this subject. "
+                "Remove clearly unsupported added product details identified by the audit; "
+                "if the angle exposes unsupported surfaces, return to a source-supported view "
+                "instead of guessing their construction. Retain natural folds, lighting and separate scene decorations."
+            )
         elif kind in ("fact", "element"):
             failed = requirement.origin != "preferred" and (
                 (requirement.applicability == "must_show" and check.presence != "present")

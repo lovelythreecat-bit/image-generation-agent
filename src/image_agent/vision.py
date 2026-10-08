@@ -7,6 +7,7 @@ import uuid
 
 from pydantic import ValidationError
 
+from .appearance import PRODUCT_APPEARANCE_AUDIT, PRODUCT_APPEARANCE_POLICY, SOURCE_VIEW_POLICY
 from .errors import ProviderError
 from .images import encode_jpeg
 from .marketing import MARKETING_POLICY, creative_input
@@ -224,6 +225,11 @@ class VisionClient:
             "Constraints from a hint must name its source_material_id. Atmosphere without visual facts is a brief constraint, never a fabricated fact. "
             "Each selected accessory is checked in its declared role. Ambiguity/conflict requires an Issue with actionable explicit selection options, or reanalyze if facts cannot be separated. "
             "For a clear product use status ready. For discovery issues use needs_input. IDs must be unique stable ASCII labels and all references closed. "
+            + PRODUCT_APPEARANCE_POLICY
+            + SOURCE_VIEW_POLICY
+            + "Apply the supported-view fallback before proposing appearance constraints: do not "
+            "promote guessed details or unsupported creative angles into required facts, elements "
+            "or missing-evidence issues. Preserve the user's marketing wording independently. "
             + MARKETING_POLICY
             + " "
             + (
@@ -307,6 +313,7 @@ class VisionClient:
             "Return each listed ID exactly once, copied verbatim; no additional IDs. "
             "Other facts in the analysis are context only, not additional fact_checks. "
             "An empty ID list requires an empty array. If evidence is insufficient, report that in the check; never omit its ID. "
+            + PRODUCT_APPEARANCE_POLICY
             + MARKETING_POLICY
             + " "
             + json.dumps(
@@ -348,7 +355,8 @@ class VisionClient:
     async def extract_garments(self, request, materials, subject_id):
         return await self._call(
             GarmentStructureAudit,
-            f"Extract only visible garment facts for subject {subject_id}: count, types, colors, material, pattern, neckline, sleeves, closures, pockets, waistband, length, silhouette, logos and distinctive details. No invisible inferences.",
+            f"Extract only visible garment facts for subject {subject_id}: count, types, colors, material, pattern, neckline, sleeves, closures, pockets, waistband, length, silhouette, logos and distinctive details. No invisible inferences. "
+            + PRODUCT_APPEARANCE_POLICY,
             [(m.material_id, m.data) for m in materials],
             stage="extract_garments",
         )
@@ -421,6 +429,9 @@ class VisionClient:
             "Required detail fidelity >=85; visual/platform >=70; clothing fusion/preference >=80 when applicable; shot intent >=75. "
             + audit_instruction(target.platform, target.output_type)
             + " Restrictions on text/graphics apply to added overlays, never physical product-native labels or artwork. "
+            + PRODUCT_APPEARANCE_POLICY
+            + SOURCE_VIEW_POLICY
+            + PRODUCT_APPEARANCE_AUDIT
             + MARKETING_POLICY
             + " "
             + json.dumps(
@@ -452,6 +463,9 @@ class VisionClient:
             "Recheck only product identity for these subjects: "
             + json.dumps(subject_ids)
             + ". Ignore background, lighting, model identity, pose and natural wearing deformation. Do not pardon missing required visible details. "
+            + PRODUCT_APPEARANCE_POLICY
+            + SOURCE_VIEW_POLICY
+            + PRODUCT_APPEARANCE_AUDIT
             + MARKETING_POLICY
             + " "
             + json.dumps({"user_input": context.user_input}, ensure_ascii=False)
@@ -473,6 +487,11 @@ class VisionClient:
             "Audit three detail images for distinctiveness and scene/feature/closeup role coverage. Return platform "
             + platform
             + ". "
+            + PRODUCT_APPEARANCE_POLICY
+            + SOURCE_VIEW_POLICY
+            + "Judge variety through scene, lighting, crop, composition and copy. Repeating a "
+            "supported product angle alone must not lower distinctiveness or role coverage; "
+            "do not require an unsupported side or rear view to pass the set audit. "
             + MARKETING_POLICY
             + " "
             + json.dumps({"user_input": context.user_input}, ensure_ascii=False)

@@ -204,16 +204,18 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
         ),
         detail_prompt=(
             _COMMON_DETAIL_PROMPT
-            + " Use a consistent portrait composition and show accurate alternate angles, fit, "
-            "material and construction details; modeled or in-use views are allowed."
+            + " Use a consistent portrait composition and show source-supported product views, "
+            "fit, material and construction details; modeled or in-use views are allowed. "
+            "When alternate angles are unsupported, vary scene and crop within the supported view."
         ),
         main_audit=(
             "Require an accurate, clear and complete product with faithful color, material, pattern "
             "and quantity, a clean composition, and no watermark or misleading element."
         ),
         detail_audit=(
-            "Require consistent imagery that accurately shows alternate angles, fit, material and "
-            "construction details without obscuring or changing the product."
+            "Require consistent imagery that accurately shows source-supported product views, "
+            "fit, material and construction details without obscuring or changing the product. "
+            "Accept scene and crop variation when source images do not support alternate angles."
         ),
     ),
     "temu": PlatformImageRule(
@@ -231,15 +233,18 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
         detail_prompt=(
             "Create a clear 1:1 Temu product-detail asset. Keep the exact product identity and use "
             "a simple background with no watermark, QR code, cluttered text or invented promotion. "
-            "Across the detail set, cover the front, back and important material or construction details."
+            "Across the detail set, cover source-supported product views and readable material or "
+            "construction details. Show the back only when supported by source-product images; "
+            "otherwise vary scene and crop while retaining the supported view."
         ),
         main_audit=(
             "Require a clear square composition, simple background and complete accurate product "
             "with no watermark, cluttered overlay, fake badge or invented promotion."
         ),
         detail_audit=(
-            "Require a clear square detail image that accurately contributes a front, back or close-up "
-            "view, with a simple background and no watermark or misleading element."
+            "Require a clear square detail image that accurately contributes a source-supported "
+            "product view or close-up, with a simple background and no watermark or misleading "
+            "element. Do not require a back view without supporting source-product images."
         ),
     ),
 }
