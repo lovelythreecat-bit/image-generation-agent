@@ -98,4 +98,6 @@ def test_prompt_respects_plan_and_shot(request_data):
     assert "must_show" in prompt and "e4" in prompt
     r = r.model_copy(update={"platforms": ["amazon"], "output_types": ["main_image"]})
     target = build_targets(r, "model_wear")[0]
-    assert "江南巷弄" not in build_prompt(r, target, ctx, plan)
+    prompt = build_prompt(r, target, ctx, plan)
+    assert "USER SCENE AND STYLE DIRECTION" not in prompt
+    assert "江南巷弄" in prompt  # Original input remains available for marketing wording.

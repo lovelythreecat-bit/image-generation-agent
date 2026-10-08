@@ -87,7 +87,7 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
             "Require a clear, complete and prominent product with no distortion, watermark, QR "
             "code, dense text overlay or invented promotional price. A clean scene is allowed."
         ),
-        detail_audit="Require accurate product details, clear hierarchy and no misleading claims.",
+        detail_audit="Require faithful visible product details, clear hierarchy and readable user-requested copy.",
     ),
     "tmall": PlatformImageRule(
         main_aspect_ratio="1:1",
@@ -106,7 +106,7 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
             "Require a clear, complete and accurate product, correct requested ratio, and no "
             "watermark, QR code, dense text overlay or invented promotional price."
         ),
-        detail_audit="Require accurate product details, clear hierarchy and no misleading claims.",
+        detail_audit="Require faithful visible product details, clear hierarchy and readable user-requested copy.",
     ),
     "jd": PlatformImageRule(
         main_aspect_ratio="1:1",
@@ -125,7 +125,7 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
             "Require a complete, centered, prominent and undistorted product with no watermark, "
             "QR code or misleading promotion."
         ),
-        detail_audit="Require accurate product details, readable visual hierarchy and no misleading claim.",
+        detail_audit="Require faithful visible product details and readable visual hierarchy and user-requested copy.",
     ),
     "pinduoduo": PlatformImageRule(
         main_aspect_ratio="1:1",
@@ -145,7 +145,7 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
             "Require a clear, complete and dominant product with no watermark, QR code, fake "
             "platform badge or invented promotional price."
         ),
-        detail_audit="Require accurate product details, strong clarity and no misleading promotion.",
+        detail_audit="Require faithful visible product details, strong clarity and readable user-requested copy.",
     ),
     "shopee": PlatformImageRule(
         main_aspect_ratio="1:1",
@@ -187,7 +187,7 @@ PLATFORM_IMAGE_RULES: dict[str, PlatformImageRule] = {
             "Require a clean square composition with the complete, centered and prominent product, "
             "no distortion, watermark, QR code or misleading promotion."
         ),
-        detail_audit="Require accurate product details, clean composition and no misleading claim.",
+        detail_audit="Require faithful visible product details, clean composition and readable user-requested copy.",
     ),
     "shein": PlatformImageRule(
         main_aspect_ratio="1:1",
@@ -258,7 +258,7 @@ _DEFAULT_RULE = PlatformImageRule(
     ),
     detail_prompt=_COMMON_DETAIL_PROMPT,
     main_audit="Require a complete, clear, accurate and unobstructed product with no misleading overlay.",
-    detail_audit="Require accurate product details, clean composition and no misleading claim.",
+    detail_audit="Require faithful visible product details, clean composition and readable user-requested copy.",
 )
 
 

@@ -1,5 +1,67 @@
 {
   "$defs": {
+    "CreativePlan": {
+      "additionalProperties": false,
+      "description": "User quotes stay separate from optional, model-authored visual guidance.",
+      "properties": {
+        "user_requirements": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "User Requirements",
+          "type": "array"
+        },
+        "suggestions": {
+          "items": {
+            "$ref": "#/$defs/CreativeSuggestion"
+          },
+          "maxItems": 6,
+          "title": "Suggestions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "user_requirements",
+        "suggestions"
+      ],
+      "title": "CreativePlan",
+      "type": "object"
+    },
+    "CreativeSuggestion": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect": {
+          "enum": [
+            "scene",
+            "composition",
+            "lighting",
+            "palette",
+            "product_presentation",
+            "mood"
+          ],
+          "title": "Aspect",
+          "type": "string"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "aspect",
+        "instruction",
+        "reason"
+      ],
+      "title": "CreativeSuggestion",
+      "type": "object"
+    },
     "Element": {
       "additionalProperties": false,
       "properties": {
@@ -129,6 +191,7 @@
             "visual",
             "product_label",
             "promotional_text",
+            "user_input",
             "inference",
             "unknown"
           ],
@@ -255,7 +318,8 @@
             "co_presence",
             "exclusion",
             "appearance",
-            "atmosphere"
+            "atmosphere",
+            "marketing_claim"
           ],
           "title": "Kind",
           "type": "string"
@@ -284,7 +348,8 @@
         "source": {
           "enum": [
             "brief",
-            "hint"
+            "hint",
+            "style_hint"
           ],
           "title": "Source",
           "type": "string"
@@ -688,6 +753,17 @@
           "type": "null"
         }
       ]
+    },
+    "creative_plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CreativePlan"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "issues": {
       "items": {

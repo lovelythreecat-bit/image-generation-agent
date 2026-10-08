@@ -70,6 +70,42 @@ def test_form_uses_configured_models_and_invalidates_analysis(app, tmp_path):
     assert app.analysis is None
 
 
+def test_creative_plan_is_readable_and_cleared_when_brief_changes(app, tmp_path):
+    from tests.test_creative_planning import creative_plan_data
+
+    fill(app, tmp_path)
+    app.brief.insert("1.0", "高级感，适合电商")
+    app.show_analysis(
+        MaterialAnalysis(**(analysis_data() | {"creative_plan": creative_plan_data()}))
+    )
+    rendered = app.creative_text.get("1.0", "end")
+    assert "用户明确要求" in rendered
+    assert "模型补充建议" in rendered
+    assert "高级感" in rendered and "柔和侧光" in rendered
+    app.brief.insert("end", "，户外场景")
+    app.invalidate_analysis()
+    assert "柔和侧光" not in app.creative_text.get("1.0", "end")
+    assert "重新分析" in app.creative_text.get("1.0", "end")
+
+
+@pytest.mark.parametrize("saved_result", [False, True])
+def test_open_task_without_analysis_clears_previous_creative_plan(app, tmp_path, saved_result):
+    from tests.test_creative_planning import creative_plan_data
+
+    fill(app, tmp_path)
+    app.show_analysis(
+        MaterialAnalysis(**(analysis_data() | {"creative_plan": creative_plan_data()}))
+    )
+    directory = tmp_path / "other-task"
+    directory.mkdir()
+    if saved_result:
+        (directory / "result.json").write_text(result().model_dump_json(), encoding="utf-8")
+    app.load_task(directory)
+    assert "柔和侧光" not in app.creative_text.get("1.0", "end")
+    assert app.analysis is None and app.analysis_signature is None
+    assert not app.needs_input and not app.selection_options
+
+
 def test_analyze_runs_in_worker_and_displays_result(app, tmp_path, monkeypatch):
     fill(app, tmp_path)
     app.key_fields["official_images"].set("test-image")
@@ -87,6 +123,49 @@ def test_analyze_runs_in_worker_and_displays_result(app, tmp_path, monkeypatch):
     assert app.analysis.status == "ready"
     assert "分析完成" in app.status.get()
     assert "ceramic cup" in app.analysis_text.get("1.0", "end")
+
+
+@pytest.mark.parametrize("detail", [False, True])
+def test_white_background_selects_required_platform_and_analyzes(
+    app, tmp_path, monkeypatch, detail
+):
+    fill(app, tmp_path)
+    for field in app.key_fields.values():
+        field.set("test-key")
+    app.outputs["detail_page"].set(detail)
+    app.outputs["pdd_white_background"].set(True)
+    assert app.platforms["pinduoduo"].get()
+    request = app.make_request()
+    assert request.platforms == ["taobao", "pinduoduo"]
+    assert "pdd_white_background" in request.output_types
+    assert ("detail_page" in request.output_types) == detail
+
+    async def analyze(request, config):
+        return MaterialAnalysis(**analysis_data())
+
+    monkeypatch.setattr("image_agent.desktop.analyze_materials", analyze)
+    app.start("analyze")
+    wait_idle(app)
+    assert app.analysis is not None and app.analysis.status == "ready"
+
+
+def test_deselecting_pinduoduo_clears_only_white_background(app, tmp_path):
+    fill(app, tmp_path)
+    app.platforms["pinduoduo"].set(True)
+    app.outputs["detail_page"].set(True)
+    app.outputs["pdd_white_background"].set(True)
+    app.platforms["pinduoduo"].set(False)
+    assert not app.outputs["pdd_white_background"].get()
+    request = app.make_request()
+    assert request.platforms == ["taobao"]
+    assert request.output_types == ["main_image", "detail_page"]
+
+
+def test_deselecting_white_background_keeps_selected_platforms(app, tmp_path):
+    fill(app, tmp_path)
+    app.outputs["pdd_white_background"].set(True)
+    app.outputs["pdd_white_background"].set(False)
+    assert app.make_request().platforms == ["taobao", "pinduoduo"]
 
 
 def test_worker_error_masks_session_key_and_preserves_form(app, tmp_path, monkeypatch):

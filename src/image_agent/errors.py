@@ -50,7 +50,7 @@ def make_error_info(error):
             kind="validation",
             message=redact(
                 "; ".join(
-                    f"{'.'.join(map(str, e['loc']))}: {e['type']}"
+                    f"{'.'.join(map(str, e['loc'])) or 'request'}: {e['msg']}"
                     for e in error.errors(include_input=False, include_context=False)
                 )
             ),

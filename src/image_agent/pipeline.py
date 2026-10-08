@@ -11,6 +11,7 @@ from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError, make_error_info
 from .generate import ImageGenerator
 from .images import decode_image, encode_jpeg, load_image
+from .marketing import creative_input
 from .models import (
     CreationResult,
     ErrorInfo,
@@ -215,6 +216,7 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
             selection=selection,
             input_check=input_check,
             presentation_mode=presentation,
+            user_input=creative_input(request),
             product_attributes={
                 "subjects": {
                     s.subject_id: {

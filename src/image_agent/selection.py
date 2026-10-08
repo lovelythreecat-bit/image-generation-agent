@@ -18,7 +18,7 @@ from .models import (
 )
 from .prompt import is_apparel, strict_catalog
 
-RULE_VERSION = "multi-image-r2"
+RULE_VERSION = "multi-image-r3-user-marketing"
 
 
 def analysis_fingerprint(request, materials):
@@ -28,6 +28,7 @@ def analysis_fingerprint(request, materials):
         "product_name": request.product_name,
         "category": request.category,
         "brief": request.creative_brief,
+        "style_hint": request.style_hint,
         "materials": [
             dict(
                 material_id=m.material_id,
@@ -131,7 +132,25 @@ def resolve_selection(request, analysis):
         if s.subject_id in args["subject_ids"]
         for mid in s.material_ids
     }
+    claim_facts = {
+        f.fact_id for f in analysis.facts if f.effective_verifiability == "functional_claim"
+    }
+    claim_elements = {e.element_id for e in analysis.elements if set(e.fact_ids) <= claim_facts}
     for issue in analysis.issues + analysis.intent.unmet_requirements:
+        if (
+            (issue.fact_ids or issue.element_ids)
+            and set(issue.fact_ids) <= claim_facts
+            and set(issue.element_ids) <= claim_elements
+            and issue.code in ("missing_evidence", "low_confidence", "unverifiable_claim")
+        ):
+            draft.issue_resolutions.append(
+                IssueResolution(
+                    issue_id=issue.issue_id,
+                    status="irrelevant",
+                    reason="营销声明直接用于创作，无需事实证明",
+                )
+            )
+            continue
         referenced = bool(
             issue.subject_ids or issue.element_ids or issue.fact_ids or issue.material_ids
         )
@@ -401,6 +420,8 @@ def compile_element_plan(request, target, context, config):
                 return "unverified"
         if kind == "constraint":
             constraint = next(c for c in plan.constraints if c.constraint_id == id)
+            if constraint.kind == "marketing_claim":
+                return "functional_claim"
             if (
                 constraint.kind != "exclusion"
                 and constraint.element_ids
@@ -414,9 +435,14 @@ def compile_element_plan(request, target, context, config):
 
     def add(kind, id, origin, app, reason):
         verification = verifiability(kind, id)
-        if verification == "functional_claim":
+        marketing_copy = kind == "constraint" and any(
+            c.constraint_id == id and c.kind == "marketing_claim" for c in plan.constraints
+        )
+        if verification == "functional_claim" and not marketing_copy:
             app = "not_applicable"
-            reason = "Functional claim is not visually verifiable; never invent physical proof"
+            reason = "Use the marketing statement as creative input without requiring visual proof"
+        elif marketing_copy:
+            reason = "Check the requested copy and presentation, never the truth of the statement"
 
         key = (kind, id)
         previous = reqs.get(key)
@@ -509,17 +535,6 @@ def compile_element_plan(request, target, context, config):
                 and r.origin != "preferred"
             ]
         )
-    )
-    plan.issues.extend(
-        Issue(
-            issue_id="claim-" + r.target_id[:48],
-            code="unverifiable_claim",
-            resolution="reanalyze",
-            message="功能声明无法由外观验证；不要求生成虚构结构或宣传文字",
-            fact_ids=[r.target_id],
-        )
-        for r in plan.requirements
-        if r.target_kind == "fact" and r.verifiability == "functional_claim"
     )
     _populate_references(
         plan,

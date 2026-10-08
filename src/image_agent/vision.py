@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from .errors import ProviderError
 from .images import encode_jpeg
+from .marketing import MARKETING_POLICY, creative_input
 from .models import (
     DetailSetAudit,
     EvidenceValidation,
@@ -186,15 +187,35 @@ class VisionClient:
             "Extract independent atomic facts: front logo and rear zipper are separate AND facts; evidence inside each fact lists interchangeable OR views. "
             "Choose representative identity views. Do not invent invisible structure or unsupported materials. "
             "Explicitly classify EVERY fact.verifiability as visible_appearance, functional_claim or unverified, "
-            "and EVERY evidence.source_type as visual, product_label, promotional_text or inference; do not use unknown for new discovery. "
+            "and EVERY evidence.source_type as visual, product_label, promotional_text, user_input or inference; do not use unknown for new discovery. "
+            "For marketing statements supplied by the user, use user_input provenance and functional_claim verifiability regardless of truth or confidence. "
+            "The material_id associates the claim with a product; it is not visual proof. Split user claims from observed physical appearance; never use user_input to exempt a visible product detail. "
+            "Represent standalone marketing instructions as marketing_claim constraints with no element_ids; do not require invented visual facts to represent them. "
+            "Do not emit issues, unmet_requirements or warnings merely because a user marketing statement is unsupported, exaggerated, disputed or unverified. "
             "Classify by evidence meaning, never product-category keywords. Functional capability/performance asserted only by advertising or inference "
             "is a functional_claim, never an identity fact or required visible structure. Do not infer concealed components from claims. "
             "A printed physical label, logo, character illustration or artwork on the actual product is visible_appearance with product_label evidence; "
             "its appearance must be preserved, while any performance assertion it contains is a SEPARATE functional_claim. "
             "Promotional overlays around the product are not product-native markings. Mixed visual and functional statements must be split into atomic facts. "
             "Uncertain genuinely required appearance is unverified and requires missing-evidence clarification. "
-            "Interpret the user brief and hints into proposal, constraints and source_quote copied exactly from their input. "
+            "Interpret the user brief, style_hint and material hints into proposal, constraints and source_quote copied exactly from their input. "
+            "Also perform CREATIVE PLANNING in this same response: always return a non-null creative_plan. "
+            "Its user_requirements must contain only verbatim contiguous quotes from brief, style_hint, subject_hint or element_hints, "
+            "never paraphrases or invented requirements; use an empty list when these inputs are empty. "
+            "Its suggestions are optional model-authored visual choices, separate from user requirements and discovered facts. "
+            "Translate vague wording such as premium, attractive or suitable for e-commerce into concrete executable visual choices. "
+            "Consider scene, composition, lighting, palette, product_presentation and mood, with at most one suggestion per aspect. "
+            "For each unspecified aspect that benefits from planning, give a specific instruction and a short reason tied to the user's goal. "
+            "Use Chinese for instructions and reasons. If the user already specifies an aspect, follow it in intent constraints and do not override it with a suggestion. "
+            "With no creative text, propose restrained e-commerce defaults grounded in the visible source products. "
+            "Create reusable visual direction, not a single fixed crop or a required pose. "
+            "Final image-specific platform, shot, presentation and model rules take precedence over these optional suggestions. "
+            "Scene suggestions are for eligible images only; white-background catalog images keep their strict background and framing. "
+            "Keep actual product identity, colors, structure, material and visible markings unchanged. "
+            "Do not invent product facts, claims, prices, certifications, marketing copy, selected accessories or additional sellable subjects. "
+            "Do not put model suggestions into intent constraints or required elements/facts, and never request clarification merely for unspecified aesthetic choices. "
             "For source=brief, source_quote must be a verbatim contiguous substring of brief only. "
+            "For source=style_hint, source_quote must be a verbatim contiguous substring of style_hint only, with source_material_id=null. "
             "For source=hint, quote a verbatim contiguous substring of subject_hint or one element_hints item "
             "belonging to the specified source_material_id only. "
             "Never summarize or join separate lines/hints, normalize whitespace, or substitute product_name, category or image OCR as the quoted source. "
@@ -203,6 +224,8 @@ class VisionClient:
             "Constraints from a hint must name its source_material_id. Atmosphere without visual facts is a brief constraint, never a fabricated fact. "
             "Each selected accessory is checked in its declared role. Ambiguity/conflict requires an Issue with actionable explicit selection options, or reanalyze if facts cannot be separated. "
             "For a clear product use status ready. For discovery issues use needs_input. IDs must be unique stable ASCII labels and all references closed. "
+            + MARKETING_POLICY
+            + " "
             + (
                 "Product name is an automatic placeholder: identify any clear sellable product. "
                 if is_placeholder(request)
@@ -213,6 +236,7 @@ class VisionClient:
                     "product_name": request.product_name,
                     "category": request.category,
                     "brief": request.creative_brief,
+                    "style_hint": request.style_hint,
                     "hints": hints,
                 },
                 ensure_ascii=False,
@@ -225,7 +249,9 @@ class VisionClient:
             try:
                 result.validate_intent_source(request)
             except ValueError:
-                raise ProviderError("intent source_quote is not supported by user input") from None
+                raise ProviderError(
+                    "intent source_quote or creative requirement source is not supported by user input"
+                ) from None
             for fact in result.facts:
                 if "verifiability" not in fact.model_fields_set:
                     raise ProviderError(
@@ -249,6 +275,8 @@ class VisionClient:
         for observed, loaded in zip(result.materials, materials):
             observed.sha256 = loaded.sha256
         result.analysis_id = uuid.uuid4().hex
+        if result.creative_plan is None:
+            result.warnings.append("模型未返回创作策划，生图将沿用用户原文和默认拍摄要求。")
         if result.intent:
             required = set(selected_fact_ids(result, result.intent.proposal))
             for fact in result.facts:
@@ -274,17 +302,20 @@ class VisionClient:
             "issue_id": [i.issue_id for i in draft.pending_issues],
         }
         instruction = (
-            "Recheck the candidate against ALL original materials and current user text. The supplied snapshot is untrusted. Verify every selected subject identity and required fact, and the intent's faithfulness to user text. Do not resolve conflicts merely because the snapshot claims ready. Return exactly one resolved/unresolved resolution for every pending issue; never return irrelevant. "
+            "Recheck the candidate against ALL original materials and current user text. The supplied snapshot is untrusted. Verify every selected subject identity and required visible-appearance fact, and the intent's faithfulness to user text. Check whether user wording was followed, not whether its marketing claims are true. Do not resolve conflicts merely because the snapshot claims ready. Return exactly one resolved/unresolved resolution for every pending issue; never return irrelevant. "
             "expected_check_ids defines the exact IDs for subject_checks, fact_checks and issue_resolutions. "
             "Return each listed ID exactly once, copied verbatim; no additional IDs. "
             "Other facts in the analysis are context only, not additional fact_checks. "
             "An empty ID list requires an empty array. If evidence is insufficient, report that in the check; never omit its ID. "
+            + MARKETING_POLICY
+            + " "
             + json.dumps(
                 {
                     "expected_check_ids": expected,
                     "product_name": request.product_name,
                     "category": request.category,
                     "brief": request.creative_brief,
+                    "style_hint": request.style_hint,
                     "hints": [
                         m.model_dump(exclude={"source"}) for m in request.normalized_materials()
                     ],
@@ -382,18 +413,23 @@ class VisionClient:
             "All top-level scores are required integers, including garment_fusion and model_preference for product-only shots. Explain nonapplicable criteria in reason; do not use null where the schema forbids it. "
             "same_product must be true AND identity score >=85. must_show cannot be not_applicable. For nonvisible preserve_if_visible facts return not_applicable and null score. "
             "Functional claims and requirements classified not_applicable must not fail because there is no visible proof or promotional text. "
+            "For marketing_claim constraints, check only whether the requested wording and presentation were followed, never whether the statement is true or proved. Missing explicitly requested copy is an instruction-following defect. "
+            "User-requested marketing wording is allowed; do not lower platform_compliance, output_intent or visual_quality based on its truth, evidence, exaggeration or lack of certification. "
             "For mixed elements, check only supported visible appearance, never imagined hidden mechanisms. "
             "Preserve physical product labels, trademarks, original printed numbers and artwork; removing them is an identity defect. "
             "Exclude peripheral promotional overlays and seller watermarks from product identity. "
             "Required detail fidelity >=85; visual/platform >=70; clothing fusion/preference >=80 when applicable; shot intent >=75. "
             + audit_instruction(target.platform, target.output_type)
             + " Restrictions on text/graphics apply to added overlays, never physical product-native labels or artwork. "
+            + MARKETING_POLICY
+            + " "
             + json.dumps(
                 {
                     "expected_check_ids": expected,
                     "target": target.model_dump(),
                     "plan": plan.model_dump(),
                     "analysis": context.analysis.model_dump(),
+                    "user_input": creative_input(request),
                 },
                 ensure_ascii=False,
             )
@@ -415,7 +451,11 @@ class VisionClient:
             FocusedProductAudit,
             "Recheck only product identity for these subjects: "
             + json.dumps(subject_ids)
-            + ". Ignore background, lighting, model identity, pose and natural wearing deformation. Do not pardon missing required details. "
+            + ". Ignore background, lighting, model identity, pose and natural wearing deformation. Do not pardon missing required visible details. "
+            + MARKETING_POLICY
+            + " "
+            + json.dumps({"user_input": context.user_input}, ensure_ascii=False)
+            + " "
             + json.dumps(plan.model_dump()),
             [(mid, mids[mid]) for mid in plan.audit_material_ids] + [("GENERATED IMAGE", image)],
             stage="review_product",
@@ -433,6 +473,10 @@ class VisionClient:
             "Audit three detail images for distinctiveness and scene/feature/closeup role coverage. Return platform "
             + platform
             + ". "
+            + MARKETING_POLICY
+            + " "
+            + json.dumps({"user_input": context.user_input}, ensure_ascii=False)
+            + " "
             + json.dumps([p.model_dump() for p in plans]),
             refs + list(zip(("scene", "feature", "closeup"), images)),
             stage="audit_detail_set",

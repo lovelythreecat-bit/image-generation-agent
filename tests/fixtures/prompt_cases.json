@@ -3,7 +3,7 @@
   "cases": [
     {"name":"taobao-product", "platform":"taobao", "output":"main_image", "presentation":"product_only", "preference":"auto", "style":null, "contains":["Hero product shot", "Taobao main-image rules", "No model or person"], "absent":["head-to-toe"]},
     {"name":"apparel-no-face", "platform":"taobao", "output":"main_image", "presentation":"model_wear", "preference":"no_face", "style":null, "contains":["face must not be visible", "head-to-toe", "realistic folds"], "absent":[]},
-    {"name":"amazon-scene-restriction", "platform":"amazon", "output":"main_image", "presentation":"product_only", "preference":"auto", "style":"江南巷弄", "contains":["pure white RGB 255,255,255", "Target aspect ratio: 1:1."], "absent":["江南巷弄"]},
-    {"name":"pdd-white", "platform":"pinduoduo", "output":"pdd_white_background", "presentation":"product_only", "preference":"female", "style":"江南巷弄", "contains":["Pinduoduo WHITE-BACKGROUND image rules", "exactly one sellable product", "Target aspect ratio: 1:1."], "absent":["江南巷弄", "female model"]}
+    {"name":"amazon-scene-restriction", "platform":"amazon", "output":"main_image", "presentation":"product_only", "preference":"auto", "style":"江南巷弄", "contains":["pure white RGB 255,255,255", "Target aspect ratio: 1:1.", "江南巷弄"], "absent":["USER SCENE AND STYLE DIRECTION"]},
+    {"name":"pdd-white", "platform":"pinduoduo", "output":"pdd_white_background", "presentation":"product_only", "preference":"female", "style":"江南巷弄", "contains":["Pinduoduo WHITE-BACKGROUND image rules", "exactly one sellable product", "Target aspect ratio: 1:1.", "江南巷弄"], "absent":["USER SCENE AND STYLE DIRECTION", "female model"]}
   ]
 }

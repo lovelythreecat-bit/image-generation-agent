@@ -1,3 +1,4 @@
+from .marketing import MARKETING_POLICY
 from .models import ComplianceResult
 from .platforms import generation_instruction
 from .prompt import STRUCTURED_MARKER, scene_hint, strict_catalog
@@ -5,8 +6,9 @@ from .prompt import STRUCTURED_MARKER, scene_hint, strict_catalog
 REF_WATERMARK_SUFFIX = (
     " Preserve physical product labels, trademarks, printed numbers, patterns and artwork "
     "that belong to the actual product; these are identity evidence. Remove only peripheral "
-    "promotional overlays, seller watermarks, added price tags and platform badges. "
-    "Do not invent new advertising text. Product-native markings are not promotional overlays."
+    "promotional overlays, seller watermarks, added price tags and platform badges that the "
+    "user has not requested. Preserve or create the marketing wording the user requests "
+    "without checking its truth. Product-native markings are not promotional overlays."
 )
 
 
@@ -34,6 +36,8 @@ def apply_compliance(request, target, prompt):
         + " "
         + generation_instruction(target.platform, target.output_type, scene_mode=scene)
         + REF_WATERMARK_SUFFIX
+        + " "
+        + MARKETING_POLICY
     )
     final += f" Target aspect ratio: {target.aspect_ratio}."
     return ComplianceResult(blocked=False, prompt=final, warnings=warnings)

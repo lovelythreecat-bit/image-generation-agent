@@ -120,9 +120,7 @@ def test_promotion_function_is_not_a_required_visible_structure(request_data):
     assert rows["benefit"].applicability == "not_applicable"
     assert "performance" not in plan.required_fact_ids
     assert "performance" not in selected_fact_ids(ctx.analysis, ctx.selection)
-    assert any(
-        i.code == "unverifiable_claim" and i.fact_ids == ["performance"] for i in plan.issues
-    )
+    assert not plan.issues
 
 
 @pytest.mark.parametrize("source_type", ["visual", "product_label"])

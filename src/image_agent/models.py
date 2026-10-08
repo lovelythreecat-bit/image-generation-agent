@@ -241,9 +241,9 @@ class MaterialObservation(Model):
 class Evidence(Model):
     material_id: Id
     observation: str = Field(min_length=1)
-    source_type: Literal["visual", "product_label", "promotional_text", "inference", "unknown"] = (
-        "unknown"
-    )
+    source_type: Literal[
+        "visual", "product_label", "promotional_text", "user_input", "inference", "unknown"
+    ] = "unknown"
 
 
 class Fact(Model):
@@ -257,6 +257,8 @@ class Fact(Model):
     @property
     def effective_verifiability(self):
         """Legacy unknown provenance preserves existing appearance requirements."""
+        if all(e.source_type == "user_input" for e in self.evidence):
+            return "functional_claim"
         if self.verifiability != "visible_appearance":
             return self.verifiability
         if all(e.source_type in ("promotional_text", "inference") for e in self.evidence):
@@ -290,11 +292,13 @@ class SelectionProposal(Model):
 
 class IntentConstraint(Model):
     constraint_id: Id
-    kind: Literal["placement", "co_presence", "exclusion", "appearance", "atmosphere"]
+    kind: Literal[
+        "placement", "co_presence", "exclusion", "appearance", "atmosphere", "marketing_claim"
+    ]
     subject_ids: list[Id]
     element_ids: list[Id]
     instruction: str = Field(min_length=1)
-    source: Literal["brief", "hint"]
+    source: Literal["brief", "hint", "style_hint"]
     source_quote: str = Field(min_length=1)
     source_material_id: Id | None
     priority: Literal["required", "preferred"]
@@ -325,6 +329,26 @@ class IntentAnalysis(Model):
     unmet_requirements: list[Issue]
 
 
+class CreativeSuggestion(Model):
+    aspect: Literal["scene", "composition", "lighting", "palette", "product_presentation", "mood"]
+    instruction: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class CreativePlan(Model):
+    """User quotes stay separate from optional, model-authored visual guidance."""
+
+    user_requirements: list[Annotated[str, Field(min_length=1)]]
+    suggestions: list[CreativeSuggestion] = Field(max_length=6)
+
+    @model_validator(mode="after")
+    def unique_aspects(self):
+        aspects = [s.aspect for s in self.suggestions]
+        if len(aspects) != len(set(aspects)):
+            raise ValueError("creative suggestions require unique aspects")
+        return self
+
+
 class MaterialAnalysis(Model):
     schema_version: Literal["1.0"] = "1.0"
     analysis_id: Id
@@ -335,6 +359,7 @@ class MaterialAnalysis(Model):
     facts: list[Fact]
     elements: list[Element]
     intent: IntentAnalysis | None
+    creative_plan: CreativePlan | None = None
     issues: list[Issue] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error_info: ErrorInfo | None = None
@@ -403,7 +428,7 @@ class MaterialAnalysis(Model):
         for c in self.intent.constraints:
             refs(c.subject_ids, "subject")
             refs(c.element_ids, "element")
-            if (c.source == "brief" and c.source_material_id is not None) or (
+            if (c.source in ("brief", "style_hint") and c.source_material_id is not None) or (
                 c.source == "hint" and c.source_material_id not in tables["material"]
             ):
                 raise ValueError("invalid constraint source")
@@ -428,10 +453,21 @@ class MaterialAnalysis(Model):
 
     def validate_intent_source(self, request):
         materials = {m.material_id: m for m in request.normalized_materials()}
+        if self.creative_plan:
+            sources = [request.creative_brief or "", request.style_hint or ""]
+            for material in materials.values():
+                sources.extend([material.subject_hint or "", *material.element_hints])
+            if any(
+                not quote.strip() or not any(quote in source for source in sources)
+                for quote in self.creative_plan.user_requirements
+            ):
+                raise ValueError("creative user requirement absent from user input")
         if self.intent:
             for c in self.intent.constraints:
                 if c.source == "brief":
                     sources = [request.creative_brief or ""]
+                elif c.source == "style_hint":
+                    sources = [request.style_hint or ""]
                 else:
                     m = materials.get(c.source_material_id)
                     sources = [m.subject_hint or "", *m.element_hints] if m else []
@@ -588,6 +624,7 @@ class PreparedContext(PreparedAnalysis):
     input_check: ProductInputAudit
     presentation_mode: str
     product_attributes: dict = Field(default_factory=dict)
+    user_input: dict = Field(default_factory=dict)
     style_prompt: str | None = None
     warnings: list[str] = Field(default_factory=list)
 

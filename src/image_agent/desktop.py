@@ -100,6 +100,8 @@ class DesktopApp:
         }
         self.platforms = {name: tk.BooleanVar(value=name == "taobao") for name in PLATFORMS}
         self.outputs = {name: tk.BooleanVar(value=name == "main_image") for name in OUTPUTS}
+        self.outputs["pdd_white_background"].trace_add("write", self._white_background_changed)
+        self.platforms["pinduoduo"].trace_add("write", self._pinduoduo_changed)
         self._build()
         for key in ("product_name", "category"):
             self.fields[key].trace_add("write", self.invalidate_analysis)
@@ -180,6 +182,12 @@ class DesktopApp:
         ttk.Separator(targets).pack(fill="x", pady=8)
         for name, var in self.outputs.items():
             ttk.Checkbutton(targets, text=OUTPUT_LABELS[name], variable=var).pack(anchor="w")
+        ttk.Label(
+            targets,
+            text="勾选拼多多白底会同时选中拼多多平台。",
+            style="Muted.TLabel",
+            wraplength=345,
+        ).pack(anchor="w", pady=(3, 0))
         self.model_combo = self._combo(targets, "模型别名", "image_model", ("fast", "pro", "base"))
         self._combo(targets, "图片尺寸", "image_size", ("1K", "2K", "4K"))
         self._combo(
@@ -287,6 +295,19 @@ class DesktopApp:
             self.notebook, wrap="word", font=("Consolas", 10), state="disabled"
         )
         self.notebook.add(self.json_text, text="结果 / 审核 JSON")
+        creative_tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(creative_tab, text="创作策划")
+        ttk.Label(
+            creative_tab,
+            text="模型补充未指定的画面细节；用户要求、商品外观和平台规则优先。",
+            style="Muted.TLabel",
+            wraplength=650,
+        ).pack(anchor="w", pady=(0, 8))
+        self.creative_text = ScrolledText(
+            creative_tab, wrap="word", font=("Microsoft YaHei UI", 10), state="disabled"
+        )
+        self.creative_text.pack(fill="both", expand=True)
+        self.show_creative_plan(None)
 
         footer = ttk.Frame(root, padding=(20, 12))
         footer.grid(row=2, column=0, sticky="ew")
@@ -434,6 +455,13 @@ class DesktopApp:
     def load_task(self, directory):
         if self.busy:
             return
+        self.analysis = self.analysis_signature = None
+        self.needs_input = False
+        self.selection_options = []
+        self.choice.configure(values=("自动选择",))
+        self.choice.current(0)
+        self._text(self.analysis_text, "当前任务暂无素材分析。")
+        self.show_creative_plan(None)
         self.run_dir = Path(directory).resolve()
         self.output_folder = self.run_dir
         try:
@@ -497,7 +525,18 @@ class DesktopApp:
             self.choice.configure(values=("自动选择",))
             self.choice.current(0)
             self._text(self.analysis_text, "素材或创作要求已修改，请重新分析。")
+            self._text(self.creative_text, "素材或创作要求已修改，请重新分析以更新创作策划。")
             self.status.set("输入已修改，旧分析与选择已清除。")
+
+    def _white_background_changed(self, *_args):
+        if self.outputs["pdd_white_background"].get() and not self.platforms["pinduoduo"].get():
+            self.platforms["pinduoduo"].set(True)
+            self.status.set("已选中拼多多平台，用于生成拼多多白底图。")
+
+    def _pinduoduo_changed(self, *_args):
+        if not self.platforms["pinduoduo"].get() and self.outputs["pdd_white_background"].get():
+            self.outputs["pdd_white_background"].set(False)
+            self.status.set("已取消拼多多白底图；生成白底图需要选中拼多多平台。")
 
     def make_request(self):
         if not self.output_path.get().strip():
@@ -699,6 +738,7 @@ class DesktopApp:
 
     def show_analysis(self, analysis, *, issues=(), needs_input=None):
         self.analysis = analysis
+        self.show_creative_plan(analysis.creative_plan)
         self.analysis_signature = self._signature()
         self.needs_input = analysis.status == "needs_input" if needs_input is None else needs_input
         self.selection_options = []
@@ -727,6 +767,35 @@ class DesktopApp:
         if issues:
             data = {"analysis": data, "current_issues": [i.model_dump(mode="json") for i in issues]}
         self._text(self.analysis_text, self.to_json(data))
+
+    def show_creative_plan(self, plan):
+        if plan is None:
+            self._text(self.creative_text, "暂无创作策划。点击「分析素材」生成；旧分析需重新分析。")
+            return
+        labels = {
+            "scene": "场景 / 背景",
+            "composition": "构图 / 机位",
+            "lighting": "光线",
+            "palette": "配色",
+            "product_presentation": "商品展示重点",
+            "mood": "氛围",
+        }
+        parts = ["用户明确要求（原文摘录）"]
+        parts.extend(f"• {quote}" for quote in plan.user_requirements)
+        if not plan.user_requirements:
+            parts.append("未填写创作文字要求，按商品素材规划电商画面。")
+        parts.extend(["", "模型补充建议（仅补充未指定的细节）"])
+        for suggestion in plan.suggestions:
+            parts.extend(
+                [
+                    f"{labels[suggestion.aspect]}：{suggestion.instruction}",
+                    f"理由：{suggestion.reason}",
+                    "",
+                ]
+            )
+        if not plan.suggestions:
+            parts.append("没有额外补充建议，沿用用户要求和默认拍摄规则。")
+        self._text(self.creative_text, self.safe_text("\n".join(parts)))
 
     def show_result(self, result):
         self.run_dir = Path(result.run_dir).resolve() if result.run_dir else None
@@ -769,6 +838,8 @@ class DesktopApp:
             self.show_analysis(
                 result.analysis, issues=result.issues, needs_input=result.status == "needs_input"
             )
+        else:
+            self.show_creative_plan(None)
         self.status.set(
             f"任务结果 · {STATUS_LABELS.get(result.status, result.status)} · "
             f"成功 {sum(a.status == 'succeeded' for a in result.assets)}/{len(result.assets)} 张"

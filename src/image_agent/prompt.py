@@ -3,6 +3,7 @@
 import json
 import re
 
+from .marketing import MARKETING_POLICY, user_directions
 from .models import AssetTarget
 from .platforms import aspect_ratio_for
 
@@ -143,7 +144,7 @@ _CATEGORY_FAMILIES = {
 SHOTS = {
     "hero": "Hero product shot, full product clearly visible and centered, studio-grade lighting with soft shadows, crisp focus on the product, uncluttered background, premium e-commerce look",
     "scene": "Lifestyle scene shot, visibly different from the main catalog image: show the product in a credible furnished environment with at least two readable contextual elements, not a plain seamless studio wall. For model-wear apparel, use a natural three-quarter or full-body walking, turning or interacting pose from a different camera angle while keeping the garment readable. Use soft natural light, depth and an aspirational mood",
-    "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize one source-supported benefit such as fit, silhouette, drape or construction through the model pose and camera angle. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for later marketing copy but generate no added promotional text, labels or invented callouts; preserve product-native labels and artwork",
+    "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize the user's requested selling point through composition, pose and requested marketing copy. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for marketing copy, and include promotional text, labels or callouts when requested by the user; preserve product-native labels and artwork",
     "closeup": "Macro close-up detail shot: crop tightly into one detail visibly supported by the source image, such as neckline, stitching, texture or construction. Use sharp focus and soft side light; do not invent fabric texture, labels or components that cannot be verified",
 }
 
@@ -217,7 +218,9 @@ def build_targets(request, presentation_mode):
 
 def build_prompt(request, target, context, plan, mode="standard"):
     parts = [
-        f"Create a high-quality e-commerce photo of the selected source products. The declared product is {request.product_name}, category {request.category}. Do not change category, silhouette, construction, color, material, pattern, proportions or distinctive details. Never substitute the products from scene/style references."
+        f"Create a high-quality e-commerce photo of the selected source products. The declared product is {request.product_name}, category {request.category}. Do not change category, silhouette, construction, color, material, pattern, proportions or distinctive details. Never substitute the products from scene/style references.",
+        MARKETING_POLICY,
+        user_directions(request),
     ]
     if target.presentation_mode == "model_wear":
         parts.append(
@@ -250,6 +253,22 @@ def build_prompt(request, target, context, plan, mode="standard"):
             parts.append(f"USER SCENE AND STYLE DIRECTION: {request.style_hint}")
         if context.style_prompt:
             parts.append(f"Supplement unspecified visual details only: {context.style_prompt}")
+    if context.analysis.creative_plan:
+        suggestions = [
+            s.model_dump()
+            for s in context.analysis.creative_plan.suggestions
+            if not strict_catalog(target) or s.aspect == "lighting"
+        ]
+        if suggestions:
+            parts.append(
+                "MODEL CREATIVE SUGGESTIONS (optional visual guidance, not user requirements): "
+                "Use only to fill unspecified details. User directions, source-product identity, "
+                "selected subjects/accessories, platform rules, presentation mode and this image's "
+                "shot/crop rules take precedence. Selected style references also take precedence. "
+                "Adapt to this image's role; never replace a macro close-up with a full-product shot. "
+                "Ignore incompatible suggestions. Do not invent claims, copy or product details.\n"
+                + json.dumps(suggestions, ensure_ascii=False)
+            )
     if context.product_attributes:
         parts.append(
             "VISIBLE GARMENT FACTS: " + json.dumps(context.product_attributes, ensure_ascii=False)
@@ -327,7 +346,15 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
             action = "Restore this verified visible detail from the original evidence without inventing components."
         else:
             failed = requirement.applicability == "must_show" and not check.satisfied
-            action = "Implement the specified placement, appearance or exclusion while preserving product identity."
+            marketing_copy = any(
+                c.constraint_id == requirement.target_id and c.kind == "marketing_claim"
+                for c in plan.constraints
+            )
+            action = (
+                "Restore the user-requested marketing copy and presentation exactly without fact-checking, weakening or disclaimers."
+                if marketing_copy
+                else "Implement the specified placement, appearance or exclusion while preserving product identity."
+            )
         row = {"kind": kind, "id": requirement.target_id, "check": check.model_dump()}
         if failed:
             row.update(action=action, requirement=requirement.model_dump())
@@ -402,7 +429,7 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
             "Use the previous candidate only to locate the reported errors; it must never replace original identity evidence. "
             "If the previous candidate is unavailable as an image, use this written audit feedback only. "
             "Preserve already-correct product details, native labels/artwork, layout and other passing requirements. "
-            "Do not add structures or promotional text to demonstrate unverified functional claims. "
+            "Preserve the user's marketing statements and requested promotional text without fact-checking them. "
             "Change only the listed failed objects/metrics and retain the requested shot.\n"
             + json.dumps(
                 {"failures": failures, "preserve": preserve, "model_reason": quality.model_reason},
