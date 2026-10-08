@@ -49,7 +49,7 @@ async def test_integration_adapter_executes_real_selection_pipeline():
         create=create,
     )
     assert bundle.dto.status == "succeeded" and bundle.blobs
-    assert vision.calls.count("discover") == 1 and vision.calls.count("evidence") == 1
+    assert vision.calls.count("discover") == 1 and vision.calls.count("evidence") == 0
 
 
 def test_request_binding_and_closed_schema():

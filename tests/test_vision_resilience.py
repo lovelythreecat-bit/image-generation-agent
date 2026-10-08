@@ -165,12 +165,10 @@ async def test_fresh_discovery_corrects_missing_semantic_provenance(request_data
 
 
 @pytest.mark.parametrize("source", ["brief", "hint"])
-@pytest.mark.parametrize("correct_second", [True, False])
-async def test_discovery_source_quote_uses_bounded_correction_and_real_budget(
-    request_data, tmp_path, correct_second, source
+@pytest.mark.parametrize("format_variation", [True, False])
+async def test_discovery_source_quote_normalizes_or_discards_without_paid_correction(
+    request_data, tmp_path, format_variation, source
 ):
-    from copy import deepcopy
-
     import httpx
 
     from image_agent.execution import BudgetLedger, ExecutionPolicy, call_scope
@@ -182,7 +180,6 @@ async def test_discovery_source_quote_uses_bounded_correction_and_real_budget(
     brief = "手机壳\n磁吸\n液态壳\n二次元\n可爱\nMiku\n初音未来"
     request = CreationRequest(**(request_data | {"creative_brief": brief}))
     request.materials[0].element_hints = ["Miku", "初音未来"]
-    exact_quote = "Miku\n初音未来" if source == "brief" else "Miku"
     bad = analysis_data()
     bad["intent"]["constraints"] = [
         dict(
@@ -192,14 +189,14 @@ async def test_discovery_source_quote_uses_bounded_correction_and_real_budget(
             element_ids=["e1"],
             instruction="preserve the requested illustration",
             source=source,
-            source_quote="二次元 可爱 Miku" if source == "brief" else "可爱",
+            source_quote=("Miku 初音未来" if source == "brief" else "Miku")
+            if format_variation
+            else "invented color",
             source_material_id=None if source == "brief" else "m1",
             priority="required",
         )
     ]
-    good = deepcopy(bad)
-    good["intent"]["constraints"][0]["source_quote"] = exact_quote
-    replies = [bad, good if correct_second else bad]
+    replies = [bad]
     submitted = []
 
     def respond(http_request):
@@ -213,26 +210,14 @@ async def test_discovery_source_quote_uses_bounded_correction_and_real_budget(
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             vision = VisionClient(HttpTransport(AgentConfig(), client=client), AgentConfig())
             with call_scope(ledger, "vision"):
-                if correct_second:
-                    result = await vision.analyze_materials(request, materials())
-                    assert result.intent.constraints[0].source_quote == exact_quote
+                result = await vision.analyze_materials(request, materials())
+                if format_variation:
+                    assert result.intent.constraints
                     result.validate_intent_source(request)
                 else:
-                    with pytest.raises(ProviderError, match="source_quote") as caught:
-                        await vision.analyze_materials(request, materials())
-                    assert "analyze_materials" in caught.value.message
-                    assert "attempt=2/2" in caught.value.message
-        assert len(submitted) == 2
-        assert ledger.usage() == {"image_calls": 0, "vision_calls": 2}
-        first, second = [payload["messages"][0]["content"] for payload in submitted]
-        assert first[1:] == second[1:]
-        assert "source_quote" in second[0]["text"]
-        assert "previous response failed validation" in second[0]["text"]
-        for prompt in (first[0]["text"], second[0]["text"]):
-            assert "source=brief" in prompt and "source=hint" in prompt
-            assert "verbatim contiguous substring" in prompt
-            assert "Never summarize or join separate lines/hints" in prompt
-            assert "product_name, category or image OCR" in prompt
+                    assert not result.intent.constraints and result.warnings
+        assert len(submitted) == 1
+        assert ledger.usage() == {"image_calls": 0, "vision_calls": 1}
     finally:
         ledger.close()
 

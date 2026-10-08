@@ -170,7 +170,12 @@ def result_to_bundle(result: CreationResult) -> ResultBundle:
             {key: value for key, value in candidate.items() if key in CandidateDTO.model_fields}
             for candidate in asset.candidates
         ]
-        if asset.status == "succeeded" and asset.image is not None:
+        has_final_candidate = not asset.candidates or any(
+            candidate["status"] != "stage" for candidate in asset.candidates
+        )
+        # Bytes are candidate delivery, never an approval signal. Preserve the
+        # audit status/error/critical findings alongside them, including unaudited.
+        if has_final_candidate and asset.image is not None:
             if asset.asset_id in blobs:
                 raise AgentError("duplicate result asset_id")
             blobs[asset.asset_id] = asset.image

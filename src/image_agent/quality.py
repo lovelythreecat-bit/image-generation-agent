@@ -76,6 +76,25 @@ def validate_check_ids(checks, expected, key):
         )
 
 
+def normalize_audit_checks(audit, expected):
+    """Keep expected checks on a copy; missing/conflicting evidence is still invalid."""
+    result = audit.model_copy(deep=True)
+    for key, required in expected.items():
+        field = "issue_resolutions" if key == "issue_id" else key.removesuffix("_id") + "_checks"
+        rows = {}
+        for check in getattr(result, field):
+            identity = getattr(check, key)
+            if identity not in required:
+                continue
+            if identity in rows and rows[identity] != check:
+                raise ProviderError(f"audit {key} contradictory duplicated check: {identity}")
+            rows[identity] = check
+        checks = [rows[i] for i in dict.fromkeys(required) if i in rows]
+        validate_check_ids(checks, required, key)
+        setattr(result, field, checks)
+    return result
+
+
 def review_subject_ids(audit, plan):
     applicable = {
         r.target_id
@@ -85,7 +104,7 @@ def review_subject_ids(audit, plan):
     return tuple(
         s.subject_id
         for s in audit.subject_checks
-        if s.subject_id in applicable and 80 <= s.score <= 84
+        if s.subject_id in applicable and s.same_product and 80 <= s.score <= 84
     )
 
 
@@ -94,25 +113,27 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
         kind: [r for r in plan.requirements if r.target_kind == kind]
         for kind in ("subject", "fact", "element", "constraint")
     }
-    for kind, rows in requirements.items():
-        validate_check_ids(
-            getattr(audit, f"{kind}_checks"), [r.target_id for r in rows], f"{kind}_id"
-        )
+    audit = normalize_audit_checks(
+        audit, {f"{kind}_id": [r.target_id for r in rows] for kind, rows in requirements.items()}
+    )
     original = audit.subject_checks
     subjects = list(original)
     reviewed = []
     if review is not None:
         ids = review_subject_ids(audit, plan)
-        validate_check_ids(review.subject_checks, ids, "subject_id")
+        review = normalize_audit_checks(review, {"subject_id": ids})
         reviewed = review.subject_checks
-        replacements = {s.subject_id: s for s in reviewed if s.same_product and s.score >= 85}
+        replacements = {s.subject_id: s for s in reviewed if not s.same_product or s.score >= 85}
         subjects = [replacements.get(s.subject_id, s) for s in subjects]
     failed = []
+    critical = []
     lookup = {s.subject_id: s for s in subjects}
     for r in requirements["subject"]:
         s = lookup[r.target_id]
         if r.applicability != "not_applicable" and (s.score < 85 or not s.same_product):
             failed.append(f"商品一致性 {s.subject_id} {s.score}<85或身份不符")
+            if not s.same_product:
+                critical.append(failed[-1])
     for kind in ("fact", "element"):
         lookup = {getattr(c, f"{kind}_id"): c for c in getattr(audit, f"{kind}_checks")}
         for r in requirements[kind]:
@@ -121,12 +142,16 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
                 continue
             if r.applicability == "must_show" and c.presence != "present":
                 failed.append(f"必需要素 {r.target_id} 未呈现")
+                critical.append(failed[-1])
             elif c.presence == "present" and c.fidelity_score < 85:
                 failed.append(f"要素保真 {r.target_id} {c.fidelity_score}<85")
+                # Clear physical changes must be reported as same_product=false;
+                # a fidelity score and prose alone do not establish that finding.
     checks = {c.constraint_id: c for c in audit.constraint_checks}
     for r in requirements["constraint"]:
         if r.applicability == "must_show" and not checks[r.target_id].satisfied:
             failed.append(f"必需约束 {r.target_id} 未满足")
+            critical.append(failed[-1])
     scores = audit.model_dump(exclude={"passed", "reason", "subject_checks"})
     if target.presentation_mode == "product_only":
         scores["garment_fusion"] = scores["model_preference"] = 100
@@ -143,6 +168,7 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
             failed.append(f"{label} {scores[name]}<{threshold}")
     if not pixels.passed:
         failed.append("像素检查 " + pixels.reason)
+        critical.append(failed[-1])
     return QualityReport(
         **scores,
         subject_checks=subjects,
@@ -153,6 +179,7 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
         model_reason=audit.reason,
         deterministic_checks=pixels,
         failed_checks=failed,
+        critical_failed_checks=critical,
         reason=("未通过指标：" + "；".join(failed) + "；审核依据：" + audit.reason)
         if failed
         else "通过",

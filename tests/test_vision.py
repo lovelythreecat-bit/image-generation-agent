@@ -51,10 +51,10 @@ async def test_discovery_complete_response_and_source_quote(request_data):
             priority="required",
         )
     ]
-    with pytest.raises(ProviderError):
-        await VisionClient(ScriptTransport([data, data]), AgentConfig()).analyze_materials(
-            CreationRequest(**request_data), materials()
-        )
+    normalized = await VisionClient(ScriptTransport([data]), AgentConfig()).analyze_materials(
+        CreationRequest(**request_data), materials()
+    )
+    assert not normalized.intent.constraints and normalized.warnings
 
 
 @pytest.mark.parametrize("value", ["a " * 19 + ".", "a " * 20 + "with.", "a " * 21])
@@ -90,7 +90,7 @@ async def test_style_transport_error_no_fallback_and_capacity(request_data):
     assert error.value.code == "vision_capacity_exceeded" and not transport.calls
 
 
-async def test_discovery_low_confidence_produces_actionable_issue(request_data):
+async def test_discovery_low_confidence_preserves_warning_without_blocking(request_data):
     from image_agent.vision import VisionClient
 
     data = analysis_data()
@@ -98,5 +98,4 @@ async def test_discovery_low_confidence_produces_actionable_issue(request_data):
     result = await VisionClient(ScriptTransport([data]), AgentConfig()).analyze_materials(
         CreationRequest(**request_data), materials()
     )
-    assert result.status == "needs_input"
-    assert result.issues[0].resolution == "recheck"
+    assert result.status == "ready" and not result.issues and result.warnings

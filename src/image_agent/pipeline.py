@@ -27,11 +27,12 @@ from .prompt import (
     resolve_presentation,
 )
 from .quality import (
-    validate_check_ids,
+    normalize_audit_checks,
 )
 from .selection import (
     analysis_fingerprint,
     finalize_selection,
+    normalize_discovery_attribution,
     resolve_selection,
 )
 from .transport import HttpTransport, compute
@@ -106,7 +107,7 @@ async def prepare_analysis(request, config, dependencies, *, loaded_materials=No
             )
         analysis = await dependencies.vision.analyze_materials(request, materials)
         analysis = MaterialAnalysis.model_validate(analysis.model_dump())
-        analysis.validate_intent_source(request)
+        analysis = normalize_discovery_attribution(analysis, request)
         if [m.material_id for m in analysis.materials] != [m.material_id for m in materials]:
             raise ProviderError("discovery material IDs do not match inputs")
         analysis.fingerprint = fingerprint
@@ -152,7 +153,6 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         if analysis.fingerprint != analysis_fingerprint(request, materials):
             raise StaleAnalysisError("analysis does not match current materials, hints or brief")
         prepared = PreparedAnalysis(materials=materials, analysis=analysis)
-    snapshot = analysis is not None
     result.analysis = prepared.analysis
     result.warnings.extend(prepared.analysis.warnings)
     if prepared.analysis.status == "failed" and prepared.analysis.intent is None:
@@ -164,8 +164,19 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         return None, result
     try:
         draft = resolve_selection(request, prepared.analysis)
+        warnings_only = bool(draft.issue_resolutions) and all(
+            resolution.status == "irrelevant" for resolution in draft.issue_resolutions
+        )
+        if warnings_only:
+            result.warnings.extend(resolution.reason for resolution in draft.issue_resolutions)
         evidence = None
-        if draft.candidate and not draft.blocking_issues and (snapshot or draft.pending_issues):
+        if (
+            draft.candidate
+            and not draft.blocking_issues
+            and (
+                draft.pending_issues or (prepared.analysis.status != "ready" and not warnings_only)
+            )
+        ):
             if len(prepared.materials) > config.vision_image_limit:
                 raise ProviderError(
                     "evidence review exceeds vision capacity",
@@ -175,11 +186,13 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
             evidence = await dependencies.vision.validate_evidence(
                 request, prepared.materials, prepared.analysis, draft
             )
-            validate_check_ids(evidence.subject_checks, draft.candidate.subject_ids, "subject_id")
-            validate_check_ids(
-                evidence.fact_checks,
-                selected_fact_ids(prepared.analysis, draft.candidate),
-                "fact_id",
+            evidence = normalize_audit_checks(
+                evidence,
+                {
+                    "subject_id": draft.candidate.subject_ids,
+                    "fact_id": selected_fact_ids(prepared.analysis, draft.candidate),
+                    "issue_id": [i.issue_id for i in draft.pending_issues],
+                },
             )
         resolution = finalize_selection(draft, evidence)
         if resolution.status != "ready":
@@ -265,6 +278,20 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
                 )
             except ProviderError as error:
                 context.warnings.append("风格分析降级: " + error.message)
+        if "detail_page" in request.output_types:
+            context.shoot_plan = {
+                "user_scene_and_style": request.style_hint,
+                "style_reference_summary": context.style_prompt,
+                "shared_visual_suggestions": {
+                    s.aspect: s.instruction
+                    for s in (
+                        prepared.analysis.creative_plan.suggestions
+                        if prepared.analysis.creative_plan
+                        else []
+                    )
+                    if s.aspect in ("scene", "lighting", "palette", "mood")
+                },
+            }
         result.input_check = input_check
         result.presentation_mode = presentation
         result.product_attributes = context.product_attributes

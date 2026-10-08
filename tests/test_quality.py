@@ -85,14 +85,13 @@ def test_identity_not_score_alone(score, same, want):
         assert choose_retry(target("amazon"), q) == "strict"
 
 
-def test_missing_duplicate_unknown_checks_are_protocol():
+def test_missing_and_unknown_required_checks_are_protocol():
     from image_agent.errors import ProviderError
     from image_agent.quality import evaluate_quality
 
     pixels = PixelChecks(passed=True, width=800, height=800, reason="ok")
     for checks in [
         [],
-        audit().subject_checks * 2,
         [audit().subject_checks[0].model_copy(update={"subject_id": "s2"})],
     ]:
         with pytest.raises(ProviderError):

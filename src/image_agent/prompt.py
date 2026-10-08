@@ -144,7 +144,7 @@ _CATEGORY_FAMILIES = {
 }
 SHOTS = {
     "hero": "Hero product shot, full product clearly visible and centered, studio-grade lighting with soft shadows, crisp focus on the product, uncluttered background, premium e-commerce look",
-    "scene": "Lifestyle scene shot, visibly different from the main catalog image through setting, lighting and composition: show the product in a credible furnished environment with at least two readable contextual elements, not a plain seamless studio wall. For model-wear apparel, use a natural three-quarter or full-body walking or interacting pose that preserves a source-supported product view while keeping the garment readable. Use soft natural light, depth and an aspirational mood",
+    "scene": "Lifestyle scene shot: show a wider contextual view of the established shooting environment, preserving its background, props, palette and lighting. Create variety through camera framing, composition and natural interaction. For model-wear apparel, use a natural three-quarter or full-body walking or interacting pose that preserves a source-supported product view while keeping the garment readable",
     "feature": "Selling-point feature shot, not a generic catalog portrait. Use a shoulder-to-hip or similarly tight editorial crop so the product occupies most of the frame. Emphasize the user's requested selling point through composition, pose and requested marketing copy. For a top, a natural hand gesture may reveal the hem, width or drape without stretching or redesigning it. Keep clean negative space for marketing copy, and include promotional text, labels or callouts when requested by the user; preserve product-native labels and artwork",
     "closeup": "Macro close-up detail shot: crop tightly into one detail visibly supported by the source image, such as neckline, stitching, texture or construction. Use sharp focus and soft side light; do not invent fabric texture, labels or components that cannot be verified",
 }
@@ -217,6 +217,36 @@ def build_targets(request, presentation_mode):
     return targets
 
 
+def build_shoot_prompt(request, target, context, plan):
+    if "detail_page" not in request.output_types or strict_catalog(target):
+        return ""
+    direction = (
+        "\nSHARED SHOOT DIRECTION:\n"
+        "Create this image as part of one coherent commercial photo shoot. Keep the same "
+        "environment, background materials, recurring props, lighting direction, time of day, "
+        "palette and color grading across the set. For model-wear images, keep the same model "
+        "identity, hairstyle, makeup and styling. Vary camera distance, crop, composition and "
+        "pose to fulfill this shot's role; a macro crop need not show the full setting or face. "
+        "User directions, selected source references and platform rules take precedence. "
+        "Shared suggestions only fill unspecified details.\n"
+        + json.dumps(getattr(context, "shoot_plan", {}), ensure_ascii=False)
+    )
+    anchor = next((b for b in plan.reference_bindings if b.role == "shoot_continuity"), None)
+    if anchor:
+        direction += (
+            f"\nReference Image {anchor.index} ({anchor.stage_id}) is the approved shoot anchor. "
+            "Match its environment, lighting, palette and model identity when visible. "
+            "Use it only for shoot continuity; original source images remain the sole authority "
+            "for product identity and physical details. Do not copy its framing or marketing text."
+        )
+    else:
+        direction += (
+            "\nEstablish a coherent setting from these shared directions for subsequent images. "
+            "Keep all shared scene, lighting and palette choices stable."
+        )
+    return direction
+
+
 def build_prompt(request, target, context, plan, mode="standard"):
     parts = [
         f"Create a high-quality e-commerce photo of the selected source products. The declared product is {request.product_name}, category {request.category}. Do not change category, silhouette, construction, color, material, pattern, proportions or distinctive details. Never substitute the products from scene/style references.",
@@ -238,6 +268,15 @@ def build_prompt(request, target, context, plan, mode="standard"):
     else:
         parts.append("Present only the selected products. No model or person.")
     shot = SHOTS.get(target.variant or "hero", "")
+    if (
+        "detail_page" in request.output_types
+        and target.variant is None
+        and not strict_catalog(target)
+    ):
+        shot = (
+            "Hero product shot, full product clearly visible and dominant, crisp product focus. "
+            "Establish the shared shooting environment with clean commercial composition."
+        )
     if scene_hint(request) and not strict_catalog(target):
         for phrase in (
             "uncluttered background",
@@ -251,6 +290,23 @@ def build_prompt(request, target, context, plan, mode="standard"):
         ):
             shot = shot.replace(phrase, "")
     parts.append(shot)
+    if target.variant == "closeup" and plan.focus_element_id is None:
+        focus_ids = {
+            r.target_id
+            for r in plan.requirements
+            if r.target_kind == "fact"
+            and r.origin == "shot_rule"
+            and r.applicability == "must_show"
+        }
+        parts.append(
+            "SOURCE-SUPPORTED CLOSE-UP FOCUS: Crop tightly into the following visible "
+            "source-product appearance. Keep other identity details only where visible in "
+            "the crop; do not reveal unsupported surfaces or invent finer detail.\n"
+            + json.dumps(
+                [f.model_dump() for f in context.analysis.facts if f.fact_id in focus_ids],
+                ensure_ascii=False,
+            )
+        )
     if not strict_catalog(target):
         if request.style_hint:
             parts.append(f"USER SCENE AND STYLE DIRECTION: {request.style_hint}")
@@ -293,6 +349,7 @@ def build_prompt(request, target, context, plan, mode="standard"):
         )
     allowed = set(plan.required_element_ids + plan.preferred_element_ids)
     facts = set(plan.required_fact_ids)
+    parts.append(build_shoot_prompt(request, target, context, plan))
     parts.append(
         STRUCTURED_MARKER
         + json.dumps(
@@ -313,7 +370,7 @@ def build_prompt(request, target, context, plan, mode="standard"):
     return "\n".join(parts)
 
 
-def build_stage_prompt(request, target, plan, final_prompt):
+def build_stage_prompt(request, target, plan, final_prompt, *, shoot_direction=""):
     return (
         "Create only a scene and natural pose template. Leave product regions empty for later fusion. "
         "Do not draw or copy product identities. Reserve space for the required subjects. "
@@ -321,6 +378,7 @@ def build_stage_prompt(request, target, plan, final_prompt):
         "source-supported product view, including supported side or rear views. Do not require "
         "a turn or new product angle merely for creative variety. "
         f"Shot: {target.variant or 'hero'}. Style: {request.style_hint or ''}. "
+        + shoot_direction
         + STRUCTURED_MARKER
         + json.dumps(
             {"subject_slots": plan.subject_ids, "presentation": plan.subject_presentations}

@@ -16,9 +16,17 @@ from .models import (
     DetailSetAudit,
     GenerationAttempt,
     GenerationReference,
+    LoadedMaterial,
     PreparedContext,
 )
-from .prompt import build_prompt, build_repair_prompt, build_stage_prompt, build_targets
+from .prompt import (
+    build_prompt,
+    build_repair_prompt,
+    build_shoot_prompt,
+    build_stage_prompt,
+    build_targets,
+    strict_catalog,
+)
 from .quality import (
     check_pixels,
     choose_retry,
@@ -46,8 +54,7 @@ def aggregate(result):
     if not result.assets:
         return
     statuses = [asset.status for asset in result.assets]
-    group_failed = any(not item.passed for item in result.detail_set_audits)
-    if all(s == "succeeded" for s in statuses) and not group_failed:
+    if all(s == "succeeded" for s in statuses):
         result.status = "succeeded"
     elif any(s in ("succeeded", "accepted") for s in statuses):
         result.status = "accepted" if all(s == "accepted" for s in statuses) else "partial"
@@ -215,6 +222,9 @@ class GraphNodes:
             scene=None,
             raw=None,
             previous_failures=None,
+            shoot_anchor=state.get("shoot_anchors", {}).get(target.platform)
+            if target.output_type == "detail_page"
+            else None,
         )
 
     def references(self, state, asset, context):
@@ -227,7 +237,39 @@ class GraphNodes:
             reserve_stage=state["stage"] == "staged_fusion",
         )
         if state["stage"] == "staged_scene":
-            return tuple(ref for ref in refs if ref.role in ("scene", "style"))
+            refs = tuple(ref for ref in refs if ref.role in ("scene", "style"))
+        anchor = state.get("shoot_anchor")
+        if anchor:
+            if state["stage"] != "staged_scene":
+                try:
+                    refs = select_references(
+                        plan,
+                        context.analysis,
+                        context.materials,
+                        limit=self.config.generation_reference_limit - 1,
+                        reserve_stage=state["stage"] == "staged_fusion",
+                    )
+                except ProviderError as error:
+                    if error.code != "reference_capacity_exceeded":
+                        raise
+            room = self.config.generation_reference_limit - int(state["stage"] == "staged_fusion")
+            if len(refs) < room:
+                refs += (
+                    GenerationReference(
+                        stage_id=anchor["stage_id"],
+                        data=self.store.read(anchor),
+                        role="shoot_continuity",
+                    ),
+                )
+            else:
+                warning = (
+                    asset.asset_id
+                    + ": reference capacity retains required evidence; shoot continuity uses shared text only"
+                )
+                if warning not in state["result"]["warnings"]:
+                    state["result"]["warnings"].append(warning)
+        if state["stage"] == "staged_scene":
+            return refs
         if state["stage"] == "staged_fusion":
             refs += (
                 GenerationReference(
@@ -259,7 +301,9 @@ class GraphNodes:
         old = self.store.operation(operation)
         if old and old["status"] == "saved":
             state.update(raw=old["raw"], operation=operation, phase="save_candidate")
-            if "attempt" in old:
+            if "asset_snapshot" in old:
+                self.update_asset(state, Asset.model_validate(old["asset_snapshot"]))
+            elif "attempt" in old:
                 asset.attempts.append(GenerationAttempt.model_validate(old["attempt"]))
                 self.update_asset(state, asset)
             return
@@ -283,7 +327,13 @@ class GraphNodes:
                 else base_prompt
             )
         prompt = (
-            build_stage_prompt(self.request, target, plan, asset.prompt)
+            build_stage_prompt(
+                self.request,
+                target,
+                plan,
+                asset.prompt,
+                shoot_direction=build_shoot_prompt(self.request, target, context, plan),
+            )
             if state["stage"] == "staged_scene"
             else asset.prompt
         )
@@ -318,7 +368,11 @@ class GraphNodes:
         attempt.outcome = "succeeded"
         self.update_asset(state, asset)
         self.store.mark_operation(
-            operation, "saved", raw=raw, attempt=attempt.model_dump(mode="json")
+            operation,
+            "saved",
+            raw=raw,
+            attempt=attempt.model_dump(mode="json"),
+            asset_snapshot=asset.model_dump(mode="json"),
         )
         state.update(raw=raw, operation=operation, phase="save_candidate")
 
@@ -502,13 +556,33 @@ class GraphNodes:
             state.setdefault("cleanup", []).append(candidate["file_path"])
             asset.file_path = candidate["file_path"] = ref["path"]
             candidate["selected"] = True
+            target = self.target(state)
+            if "detail_page" in self.request.output_types and (
+                (target.output_type == "main_image" and not strict_catalog(target))
+                or (target.output_type == "detail_page" and target.variant == "scene")
+            ):
+                state.setdefault("shoot_anchors", {}).setdefault(
+                    target.platform,
+                    ref | {"stage_id": f"shoot-{target.platform}-{target.variant or 'main'}"},
+                )
         elif asset.candidates:
+            warning_only = (
+                asset.quality is not None
+                and asset.quality.critical_failed_checks == []
+                and asset.status == "quality_failed"
+            )
             state["result"]["warnings"].append(
-                asset.asset_id + ": 图片已保留为候选图，未通过审核，不属于成功交付"
+                asset.asset_id
+                + (
+                    ": 主观指标未达标，已交付候选图及审核警告，未标记审核通过"
+                    if warning_only
+                    else ": 图片已保留为候选图，未通过审核，不属于成功交付"
+                )
             )
         self.update_asset(state, asset)
         state.setdefault("asset_runtime", {})[str(state["index"])] = {
-            key: state.get(key) for key in ("repairs", "stage", "scene", "previous_failures")
+            key: state.get(key)
+            for key in ("repairs", "stage", "scene", "previous_failures", "shoot_anchor")
         }
         queue = state.get("resume_queue")
         if queue:
@@ -551,9 +625,29 @@ class GraphNodes:
                 )
             else:
                 try:
+                    audit_context = context.model_copy(update={"shoot_reference": None})
+                    anchor = state.get("shoot_anchors", {}).get(platform)
+                    if anchor and anchor["stage_id"].endswith("-main"):
+                        source_ids = {
+                            mid for asset in detail for mid in asset.element_plan.audit_material_ids
+                        }
+                        if len(source_ids) + 4 <= self.config.vision_image_limit:
+                            audit_context.shoot_reference = LoadedMaterial(
+                                material_id=anchor["stage_id"],
+                                data=self.store.read(anchor),
+                                sha256=anchor["sha256"],
+                                order=0,
+                                role_hint="style",
+                            )
+                        else:
+                            result.warnings.append(
+                                platform
+                                + ": vision capacity retains product evidence and details; "
+                                "main-to-detail shoot continuity audit omitted"
+                            )
                     audit = await self.dependencies.vision.audit_detail_set(
                         platform,
-                        context,
+                        audit_context,
                         tuple(a.element_plan for a in detail),
                         tuple(
                             self.candidate_bytes(
@@ -577,6 +671,10 @@ class GraphNodes:
                         error_info=info,
                     )
             existing[platform] = audit
+            if not audit.passed:
+                result.warnings.append(
+                    platform + ": 详情组图审核警告（不影响有效单图）：" + audit.reason
+                )
             result.detail_set_audits = list(existing.values())
             state["result"] = result.model_dump(mode="json")
             self.store.json("state.json", state)

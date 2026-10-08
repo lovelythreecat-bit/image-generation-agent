@@ -51,7 +51,7 @@ def test_accept_cli_requires_explicit_nonempty_reason(tmp_path, monkeypatch):
     assert calls == [(tmp_path, "a1", "c0001", "Reviewed appearance")]
 
 
-def test_v2_bundle_keeps_candidates_without_local_paths_or_accepted_blobs():
+def test_v2_bundle_delivers_accepted_bytes_without_local_paths_or_automatic_success():
     from image_agent.contracts import result_to_bundle
 
     r = result()
@@ -75,7 +75,8 @@ def test_v2_bundle_keeps_candidates_without_local_paths_or_accepted_blobs():
         }
     )
     bundle = result_to_bundle(r)
-    assert not bundle.blobs
+    assert bundle.blobs[r.assets[0].asset_id] == r.assets[0].image
+    assert bundle.dto.assets[0].status == "accepted"
     data = bundle.dto.model_dump(mode="json")
     assert data["schema_version"] == "2.0"
     assert data["assets"][0]["candidates"][0]["candidate_id"] == "c0001"

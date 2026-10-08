@@ -4,8 +4,9 @@ import base64
 import json
 import re
 import uuid
+from typing import Annotated, get_args, get_origin
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .appearance import PRODUCT_APPEARANCE_AUDIT, PRODUCT_APPEARANCE_POLICY, SOURCE_VIEW_POLICY
 from .errors import ProviderError
@@ -17,13 +18,12 @@ from .models import (
     FocusedProductAudit,
     GarmentStructureAudit,
     GeneratedImageAudit,
-    Issue,
     MaterialAnalysis,
     Model,
 )
 from .platforms import audit_instruction
 from .prompt import is_placeholder
-from .quality import validate_check_ids
+from .quality import normalize_audit_checks
 from .transport import compute
 
 
@@ -31,7 +31,43 @@ class StyleResponse(Model):
     style_prompt: str
 
 
-def _parse_vision_response(response, schema):
+def _provider_value(value, annotation):
+    """Schema-guided ingestion only; local/public models retain their strict contract."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is Annotated:
+        return _provider_value(value, args[0])
+    if (
+        isinstance(annotation, type)
+        and issubclass(annotation, BaseModel)
+        and isinstance(value, dict)
+    ):
+        return {
+            key: _provider_value(item, annotation.model_fields[key].annotation)
+            for key, item in value.items()
+            if key in annotation.model_fields
+        }
+    if origin is list and isinstance(value, list):
+        return [_provider_value(item, args[0]) for item in value]
+    if (
+        annotation is bool
+        and isinstance(value, str)
+        and value.strip().casefold() in {"true", "false"}
+    ):
+        return value.strip().casefold() == "true"
+    if annotation is int:
+        if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+            return int(value)
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+    if args and type(None) in args and value is not None:
+        for option in args:
+            if option is not type(None):
+                return _provider_value(value, option)
+    return value
+
+
+def _parse_vision_response(response, schema, *, nonapplicable_fields=()):
     try:
         choice = response["choices"][0]
         message = choice["message"]
@@ -57,6 +93,14 @@ def _parse_vision_response(response, schema):
             raw = json.loads(raw)
         if not isinstance(raw, dict):
             raise ValueError
+        raw = _provider_value(raw, schema)
+        # The frozen target supplies applicability, never the provider. These
+        # neutral values are internal placeholders ignored by local evaluation.
+        for field in nonapplicable_fields:
+            if raw.get(field) is None:
+                raw[field] = 100
+                if isinstance(raw.get("reason"), str):
+                    raw["reason"] += f"; {field}: not applicable"
         return schema.model_validate(raw)
     except ValidationError as error:
         details = "; ".join(
@@ -108,7 +152,16 @@ class VisionClient:
         self.transport, self.config = transport, config
 
     async def _call(
-        self, schema, instruction, images, *, model=None, max_px=768, stage="vision", validate=None
+        self,
+        schema,
+        instruction,
+        images,
+        *,
+        model=None,
+        max_px=768,
+        stage="vision",
+        validate=None,
+        nonapplicable_fields=(),
     ):
         if len(images) > self.config.vision_image_limit:
             raise ProviderError(
@@ -155,9 +208,13 @@ class VisionClient:
                 ),
             )
             try:
-                result = _parse_vision_response(response, schema)
+                result = _parse_vision_response(
+                    response, schema, nonapplicable_fields=nonapplicable_fields
+                )
                 if validate:
-                    validate(result)
+                    validated = validate(result)
+                    if validated is not None:
+                        result = validated
                 return result
             except ProviderError as error:
                 if error.code == "vision_refusal" or attempt == 1:
@@ -252,12 +309,6 @@ class VisionClient:
         def validate_discovery(result):
             if [m.material_id for m in result.materials] != [m.material_id for m in materials]:
                 raise ProviderError("discovery material IDs/order mismatch")
-            try:
-                result.validate_intent_source(request)
-            except ValueError:
-                raise ProviderError(
-                    "intent source_quote or creative requirement source is not supported by user input"
-                ) from None
             for fact in result.facts:
                 if "verifiability" not in fact.model_fields_set:
                     raise ProviderError(
@@ -278,26 +329,14 @@ class VisionClient:
             stage="analyze_materials",
             validate=validate_discovery,
         )
+        from .selection import normalize_discovery_attribution
+
+        result = normalize_discovery_attribution(result, request)
         for observed, loaded in zip(result.materials, materials):
             observed.sha256 = loaded.sha256
         result.analysis_id = uuid.uuid4().hex
         if result.creative_plan is None:
             result.warnings.append("模型未返回创作策划，生图将沿用用户原文和默认拍摄要求。")
-        if result.intent:
-            required = set(selected_fact_ids(result, result.intent.proposal))
-            for fact in result.facts:
-                if fact.fact_id in required and fact.confidence < 0.7:
-                    result.issues.append(
-                        Issue(
-                            issue_id="confidence-" + fact.fact_id[:48],
-                            code="low_confidence",
-                            resolution="recheck",
-                            message="必需事实可信度不足，请复核素材",
-                            fact_ids=[fact.fact_id],
-                            subject_ids=[fact.subject_id] if fact.subject_id else [],
-                        )
-                    )
-                    result.status = "needs_input"
         return result
 
     async def validate_evidence(self, request, materials, analysis, draft):
@@ -334,12 +373,7 @@ class VisionClient:
         )
 
         def validate(result):
-            for key, checks in (
-                ("subject_id", result.subject_checks),
-                ("fact_id", result.fact_checks),
-                ("issue_id", result.issue_resolutions),
-            ):
-                validate_check_ids(checks, expected[key], key)
+            return normalize_audit_checks(result, expected)
 
         result = await self._call(
             EvidenceValidation,
@@ -419,7 +453,7 @@ class VisionClient:
             "Audit every frozen requirement; return one check for each planned subject/fact/element/constraint, including nonapplicable ones. "
             "expected_check_ids lists exact IDs: return each once, no additional IDs; empty lists require empty check arrays. "
             "All top-level scores are required integers, including garment_fusion and model_preference for product-only shots. Explain nonapplicable criteria in reason; do not use null where the schema forbids it. "
-            "same_product must be true AND identity score >=85. must_show cannot be not_applicable. For nonvisible preserve_if_visible facts return not_applicable and null score. "
+            "Decide same_product from actual identity/physical structure, never from a numeric threshold alone. Report clear altered physical structure, colors, markings or wrong product as same_product=false for the affected subject, even when a fact is otherwise present. Low subjective scores are repair guidance. must_show cannot be not_applicable. For nonvisible preserve_if_visible facts return not_applicable and null score. "
             "Functional claims and requirements classified not_applicable must not fail because there is no visible proof or promotional text. "
             "For marketing_claim constraints, check only whether the requested wording and presentation were followed, never whether the statement is true or proved. Missing explicitly requested copy is an instruction-following defect. "
             "User-requested marketing wording is allowed; do not lower platform_compliance, output_intent or visual_quality based on its truth, evidence, exaggeration or lack of certification. "
@@ -447,13 +481,17 @@ class VisionClient:
         )
 
         def validate(result):
-            for kind in ("subject", "fact", "element", "constraint"):
-                validate_check_ids(
-                    getattr(result, kind + "_checks"), expected[kind + "_id"], kind + "_id"
-                )
+            return normalize_audit_checks(result, expected)
 
         return await self._call(
-            GeneratedImageAudit, instruction, images, stage="audit_image", validate=validate
+            GeneratedImageAudit,
+            instruction,
+            images,
+            stage="audit_image",
+            validate=validate,
+            nonapplicable_fields=("garment_fusion", "model_preference")
+            if target.presentation_mode == "product_only"
+            else (),
         )
 
     async def review_product(self, context, plan, subject_ids, image):
@@ -473,15 +511,15 @@ class VisionClient:
             + json.dumps(plan.model_dump()),
             [(mid, mids[mid]) for mid in plan.audit_material_ids] + [("GENERATED IMAGE", image)],
             stage="review_product",
-            validate=lambda result: validate_check_ids(
-                result.subject_checks, subject_ids, "subject_id"
-            ),
+            validate=lambda result: normalize_audit_checks(result, {"subject_id": subject_ids}),
         )
         return result
 
     async def audit_detail_set(self, platform, context, plans, images):
         mids = set(mid for p in plans for mid in p.audit_material_ids)
         refs = [(m.material_id, m.data) for m in context.materials if m.material_id in mids]
+        if context.shoot_reference is not None:
+            refs.append(("APPROVED SHOOT ANCHOR (continuity only)", context.shoot_reference.data))
         result = await self._call(
             DetailSetAudit,
             "Audit three detail images for distinctiveness and scene/feature/closeup role coverage. Return platform "
@@ -489,12 +527,21 @@ class VisionClient:
             + ". "
             + PRODUCT_APPEARANCE_POLICY
             + SOURCE_VIEW_POLICY
-            + "Judge variety through scene, lighting, crop, composition and copy. Repeating a "
+            + "Judge variety through crop, camera distance, pose, composition and copy within "
+            "one coherent photo shoot. Preserve scene, lighting direction, palette and model "
+            "identity across images and the approved shoot anchor, when supplied and visible. "
+            "The anchor is only a scene/model reference, never product evidence. "
+            "A close-up need not show the full background "
+            "or face. Report unexplained scene/model/lighting changes in issues and cap "
+            "distinctiveness below 75 when the images fail to form a coherent set. Repeating a "
             "supported product angle alone must not lower distinctiveness or role coverage; "
             "do not require an unsupported side or rear view to pass the set audit. "
             + MARKETING_POLICY
             + " "
-            + json.dumps({"user_input": context.user_input}, ensure_ascii=False)
+            + json.dumps(
+                {"user_input": context.user_input, "shoot_plan": context.shoot_plan},
+                ensure_ascii=False,
+            )
             + " "
             + json.dumps([p.model_dump() for p in plans]),
             refs + list(zip(("scene", "feature", "closeup"), images)),

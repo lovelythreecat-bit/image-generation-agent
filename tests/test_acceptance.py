@@ -138,7 +138,10 @@ async def test_group_error_does_not_downgrade_assets(request_data):
 
     vision.audit_detail_set = fail
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert result.status == "partial" and result.detail_set_audits[0].error_info.kind == "protocol"
+    assert (
+        result.status == "succeeded" and result.detail_set_audits[0].error_info.kind == "protocol"
+    )
+    assert result.warnings and all(asset.status == "succeeded" for asset in result.assets)
     assert result.detail_set_audits[0].distinctiveness is None
 
 
@@ -165,8 +168,12 @@ async def test_quality_failure_partial_keeps_candidate_outside_approved_outputs(
     ).read_bytes() == failed.image
     assert not (tmp_path / "taobao/detail_page/feature.png").exists()
     bundle = result_to_bundle(result)
-    assert failed.asset_id not in bundle.blobs
-    assert len(bundle.blobs) == 3
+    assert bundle.blobs[failed.asset_id] == failed.image
+    assert (
+        next(a for a in bundle.dto.assets if a.asset_id == failed.asset_id).status
+        == "quality_failed"
+    )
+    assert len(bundle.blobs) == 4
 
 
 async def test_staged_scene_failure_no_fusion(request_data):
@@ -246,12 +253,12 @@ def test_materials_empty_cannot_be_hidden_by_legacy(request_data):
         CreationRequest(**(request_data | {"materials": [], "product_image": {"data": b"x"}}))
 
 
-def test_required_fact_low_confidence_in_explicit_snapshot_needs_recheck(request_data):
+def test_required_fact_low_confidence_alone_does_not_require_recheck(request_data):
     d = analysis_data()
     d["facts"][0]["confidence"] = 0.1
     r = CreationRequest(**request_data)
     draft = resolve_selection(r, MaterialAnalysis(**d))
-    assert draft.pending_issues
+    assert not draft.pending_issues and draft.candidate is not None
 
 
 def test_public_schema_has_platform_and_output_enums():

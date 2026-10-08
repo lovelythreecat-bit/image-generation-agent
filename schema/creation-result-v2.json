@@ -1475,6 +1475,21 @@
           },
           "title": "Failed Checks",
           "type": "array"
+        },
+        "critical_failed_checks": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Critical Failed Checks"
         }
       },
       "required": [

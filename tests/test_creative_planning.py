@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from image_agent.config import AgentConfig
-from image_agent.errors import ProviderError
 from image_agent.models import CreationRequest, MaterialAnalysis
 from image_agent.prompt import build_prompt, build_targets
 from image_agent.selection import compile_element_plan
@@ -48,10 +47,10 @@ async def test_model_cannot_label_invented_requirements_as_user_input(request_da
     plan = creative_plan_data()
     plan["user_requirements"] = ["必须使用黑金背景"]
     data = analysis_data() | {"creative_plan": plan}
-    with pytest.raises(ProviderError, match="creative"):
-        await VisionClient(ScriptTransport([data, data]), AgentConfig()).analyze_materials(
-            request, materials()
-        )
+    transport = ScriptTransport([data])
+    result = await VisionClient(transport, AgentConfig()).analyze_materials(request, materials())
+    assert result.creative_plan.user_requirements == [] and result.warnings
+    assert len(transport.calls) == 1
 
 
 def test_cached_plan_also_checks_user_requirement_provenance(request_data):

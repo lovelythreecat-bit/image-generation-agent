@@ -79,13 +79,13 @@ async def test_public_api_real_vision_generator_and_snapshot(request_data, monke
     r.output_dir = tmp_path
     r.request_id = "create"
     result = await create_images(r, cfg, analysis=analysis)
-    assert result.status == "succeeded" and len(calls) == 4
+    assert result.status == "succeeded" and len(calls) == 3
     assert result.assets[0].image == picture((1600, 1600))
     assert (tmp_path / "create/result.json").exists()
     assert all(c.is_closed for c in clients)
     with pytest.raises(OutputError):
         await create_images(r, cfg, analysis=analysis)
-    assert len(calls) == 4
+    assert len(calls) == 3
 
 
 async def test_public_cancel_generation_retains_recovery_journal(

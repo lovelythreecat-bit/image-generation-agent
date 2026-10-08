@@ -97,7 +97,9 @@ async def test_audit_protocol_failure_preserves_candidate_and_saved_manifest(
     manifest = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     assert manifest["assets"][0]["file_path"] == "candidates/taobao.main_image.default/c0001.png"
     assert manifest["assets"][0]["status"] == "audit_error"
-    assert not result_to_bundle(saved).blobs
+    bundle = result_to_bundle(saved)
+    assert bundle.blobs[asset.asset_id] == asset.image
+    assert bundle.dto.assets[0].status == "audit_error" and bundle.dto.assets[0].quality is None
 
 
 async def test_snapshot_recovery_and_stale_detection(request_data):

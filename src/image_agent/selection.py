@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import re
+import unicodedata
 
 from .errors import AgentError, ProviderError
 from .models import (
@@ -19,6 +21,127 @@ from .models import (
 from .prompt import is_apparel, strict_catalog
 
 RULE_VERSION = "multi-image-r3-user-marketing"
+
+# A deliberately small set from the discovery planning policy. This recognizes
+# generic aesthetic requests, not general semantic equivalence or user intent.
+GENERIC_ATMOSPHERE_CUES = {
+    "premium",
+    "attractive",
+    "suitableforecommerce",
+    "高级感",
+    "高级",
+    "高端",
+    "好看",
+    "美观",
+    "适合电商",
+    "可爱",
+    "萌萌哒",
+}
+
+
+def normalize_discovery_attribution(analysis, request):
+    """Discard unverifiable model attribution without adding user obligations."""
+    result = analysis.model_copy(deep=True)
+    materials = {m.material_id: m for m in request.normalized_materials()}
+
+    def compact(value):
+        return "".join(
+            c
+            for c in unicodedata.normalize("NFKC", value)
+            if not c.isspace() and not unicodedata.category(c).startswith("P")
+        )
+
+    def supported(quote, sources):
+        for source in sources:
+            if quote.strip() and quote in source:
+                return quote
+            if compact(quote) and compact(quote) in compact(source):
+                return source  # Keep real user text for strict snapshot validation.
+        return None
+
+    def sources(constraint):
+        if constraint.source == "brief":
+            return [request.creative_brief or ""]
+        if constraint.source == "style_hint":
+            return [request.style_hint or ""]
+        material = materials.get(constraint.source_material_id)
+        return [material.subject_hint or "", *material.element_hints] if material else []
+
+    all_sources = [request.creative_brief or "", request.style_hint or ""]
+    for material in materials.values():
+        all_sources.extend([material.subject_hint or "", *material.element_hints])
+    if result.creative_plan:
+        verified = []
+        for quote in result.creative_plan.user_requirements:
+            exact = supported(quote, all_sources)
+            if exact is None:
+                result.warnings.append(f"已丢弃无法核实的用户要求归因：{quote}")
+            else:
+                verified.append(exact)
+        result.creative_plan.user_requirements = list(dict.fromkeys(verified))
+    if result.intent:
+        retained, discarded_elements = [], set()
+        for constraint in result.intent.constraints:
+            user_sources = sources(constraint)
+            exact = supported(constraint.source_quote, user_sources)
+            instruction = compact(constraint.instruction)
+            promoted_suggestion = (
+                result.creative_plan
+                and any(
+                    instruction == compact(s.instruction) for s in result.creative_plan.suggestions
+                )
+                and not any(instruction in compact(source) for source in user_sources)
+            )
+            if promoted_suggestion:
+                exact = None
+            if exact is None:
+                result.warnings.append(f"已丢弃无法核实的用户约束归因：{constraint.constraint_id}")
+                discarded_elements.update(constraint.element_ids)
+            else:
+                constraint.source_quote = exact
+                if constraint.kind == "atmosphere":
+                    # Execute user words; a model's translation/elaboration may
+                    # introduce a setting or props that the user never required.
+                    constraint.instruction = exact
+                    cues = [compact(part).casefold() for part in re.split(r"[,，、;；]+", exact)]
+                    if cues and all(cue in GENERIC_ATMOSPHERE_CUES for cue in cues):
+                        constraint.priority = "preferred"
+                        result.warnings.append(
+                            f"泛化氛围要求 {constraint.constraint_id} 已保留为偏好，具体场景仅为可选建议。"
+                        )
+                retained.append(constraint)
+        result.intent.constraints = retained
+        retained_required = {e for c in retained if c.priority == "required" for e in c.element_ids}
+        proposal = result.intent.proposal
+        elements = {element.element_id: element for element in result.elements}
+        downgraded = [
+            e
+            for e in proposal.required_element_ids
+            if e not in retained_required
+            and elements[e].kind != "identity"
+            and (e in discarded_elements or supported(elements[e].description, all_sources) is None)
+        ]
+        if downgraded:
+            result.warnings.append(
+                "未核实为用户强制要求的发现要素已降为可选：" + ", ".join(downgraded)
+            )
+            proposal.required_element_ids = [
+                e for e in proposal.required_element_ids if e not in downgraded
+            ]
+            proposal.preferred_element_ids = list(
+                dict.fromkeys(proposal.preferred_element_ids + downgraded)
+            )
+    for fact in result.facts:
+        if fact.confidence < 0.7:
+            result.warnings.append(
+                f"事实 {fact.fact_id} 可信度偏低，将优先采用素材已支持的视角或裁切。"
+            )
+    if result.intent:
+        for issue in result.issues + result.intent.unmet_requirements:
+            if issue.code in {"low_confidence", "missing_evidence"}:
+                result.warnings.append("素材证据提示：" + issue.message)
+    result.validate_intent_source(request)
+    return result
 
 
 def analysis_fingerprint(request, materials):
@@ -136,7 +259,38 @@ def resolve_selection(request, analysis):
         f.fact_id for f in analysis.facts if f.effective_verifiability == "functional_claim"
     }
     claim_elements = {e.element_id for e in analysis.elements if set(e.fact_ids) <= claim_facts}
+    required_elements = set(args["required_element_ids"])
+    required_elements.update(
+        e for c in analysis.intent.constraints if c.priority == "required" for e in c.element_ids
+    )
+    critical_facts = {
+        f
+        for s in analysis.subjects
+        if s.subject_id in args["subject_ids"]
+        for f in s.identity_fact_ids
+    }
+    critical_facts.update(
+        f for e in analysis.elements if e.element_id in required_elements for f in e.fact_ids
+    )
     for issue in analysis.issues + analysis.intent.unmet_requirements:
+        optional = bool(issue.element_ids or issue.fact_ids) and not (
+            set(issue.element_ids) & required_elements
+            or set(issue.fact_ids) & critical_facts
+            or any(
+                set(e.fact_ids) & critical_facts
+                for e in analysis.elements
+                if e.element_id in issue.element_ids
+            )
+        )
+        if issue.code == "low_confidence" or (optional and issue.code == "missing_evidence"):
+            draft.issue_resolutions.append(
+                IssueResolution(
+                    issue_id=issue.issue_id,
+                    status="irrelevant",
+                    reason="可信度或可选细节不足，采用素材支持的视角或裁切并保留警告",
+                )
+            )
+            continue
         if (
             (issue.fact_ids or issue.element_ids)
             and set(issue.fact_ids) <= claim_facts
@@ -202,7 +356,6 @@ def resolve_selection(request, analysis):
     required_facts.update(
         f for e in analysis.elements if e.element_id in required_elements for f in e.fact_ids
     )
-    covered = {f for i in draft.pending_issues + draft.blocking_issues for f in i.fact_ids}
     for fact in analysis.facts:
         if fact.fact_id not in required_facts:
             continue
@@ -219,16 +372,6 @@ def resolve_selection(request, analysis):
                 )
             )
             continue
-        if fact.fact_id not in covered and fact.confidence < 0.7:
-            draft.pending_issues.append(
-                Issue(
-                    issue_id="confidence-" + fact.fact_id[:48],
-                    code="low_confidence",
-                    resolution="recheck",
-                    message="必需事实可信度不足，请核对素材",
-                    fact_ids=[fact.fact_id],
-                )
-            )
     return draft
 
 
@@ -268,11 +411,7 @@ def finalize_selection(draft, evidence=None):
             ),
         )
     unresolved = {r.issue_id for r in evidence.issue_resolutions if r.status == "unresolved"}
-    valid = (
-        evidence.intent_valid
-        and all(s.score >= 85 for s in evidence.subject_checks)
-        and all(f.presence == "present" and f.fidelity_score >= 85 for f in evidence.fact_checks)
-    )
+    valid = evidence.intent_valid and all(f.presence == "present" for f in evidence.fact_checks)
     issues = [i for i in draft.pending_issues if i.issue_id in unresolved] + evidence.issues
     if evidence.outcome != "verified" or not valid or unresolved or issues:
         if not issues:
@@ -327,6 +466,24 @@ def compile_element_plan(request, target, context, config):
         elements[e].subject_id for e in required if elements[e].subject_id and not claim_only(e)
     )
     reasons = {e: "explicit exclusion" for e in excluded}
+    fallback_issues = []
+    for eid in list(preferred):
+        if any(
+            facts_by_id[fid].effective_verifiability == "unverified"
+            for fid in elements[eid].fact_ids
+        ):
+            preferred.remove(eid)
+            excluded.append(eid)
+            reasons[eid] = "optional appearance lacks usable source evidence"
+            fallback_issues.append(
+                Issue(
+                    issue_id="fallback-" + eid[:48],
+                    code="optional_evidence",
+                    resolution="recheck",
+                    element_ids=[eid],
+                    message=f"可选细节 {eid} 缺少可用素材，改用已支持的视角或裁切。",
+                )
+            )
 
     def environmental(eid):
         element = elements[eid]
@@ -368,9 +525,30 @@ def compile_element_plan(request, target, context, config):
         and not claim_only(e.element_id)
     ]
     focus = next(iter(focus_candidates), None)
+    focus_fact = None
     if target.variant == "closeup" and focus is None:
+        # Discovery may provide valid identity facts without optional detail elements.
+        # Reuse a directly observed fact; never manufacture an element or product detail.
+        subject = subjects[selection.primary_subject_id]
+        excluded_facts = {fid for eid in excluded for fid in elements[eid].fact_ids}
+        candidates = [
+            facts_by_id[fid]
+            for fid in subject.identity_fact_ids
+            if fid not in excluded_facts
+            and facts_by_id[fid].subject_id == subject.subject_id
+            and facts_by_id[fid].effective_verifiability == "visible_appearance"
+            and any(
+                evidence.source_type in ("visual", "product_label")
+                and evidence.material_id in subject.material_ids
+                for evidence in facts_by_id[fid].evidence
+            )
+        ]
+        focus_fact = max(candidates, key=lambda fact: fact.confidence, default=None)
+    if target.variant == "closeup" and focus is None and focus_fact is None:
         _conflict("特写缺少可信的焦点细节")
-    cropped = target.variant in ("feature", "closeup") and focus is not None
+    cropped = target.variant in ("feature", "closeup") and (
+        focus is not None or focus_fact is not None
+    )
     focus_subject = elements[focus].subject_id if focus else selection.primary_subject_id
     visible = (
         set(selection.subject_ids)
@@ -385,7 +563,8 @@ def compile_element_plan(request, target, context, config):
         if facts_by_id[f].effective_verifiability != "functional_claim"
     }
     if target.variant == "closeup" and (
-        not user_facts <= set(elements[focus].fact_ids) or len(visible) > 1
+        not user_facts <= (set(elements[focus].fact_ids) if focus else {focus_fact.fact_id})
+        or len(visible) > 1
     ):
         _conflict("微距无法同时呈现每资产必需对象或细节")
     if target.output_type == "pdd_white_background" and len(visible) > 1:
@@ -405,6 +584,7 @@ def compile_element_plan(request, target, context, config):
             for c in selection.constraints
             if c.priority == "required" or not strict_catalog(target) or c.kind != "atmosphere"
         ],
+        issues=fallback_issues,
     )
     reqs = {}
     facts = {f.fact_id: f for f in analysis.facts}
@@ -489,6 +669,14 @@ def compile_element_plan(request, target, context, config):
                 else "must_show",
                 "preserve identity within shot visibility",
             )
+    if focus_fact:
+        add(
+            "fact",
+            focus_fact.fact_id,
+            "shot_rule",
+            "must_show",
+            "Crop into this source-supported appearance without inventing hidden detail",
+        )
     for eid in required + preferred:
         element = elements[eid]
         origin = (

@@ -1,3 +1,5 @@
+import re
+
 from .marketing import MARKETING_POLICY
 from .models import ComplianceResult
 from .platforms import generation_instruction
@@ -14,7 +16,17 @@ REF_WATERMARK_SUFFIX = (
 
 def apply_compliance(request, target, prompt):
     lowered = prompt.lower()
-    if any(k in lowered for k in ("bomb", "weapon", "drug", "counterfeit", "fake", "replica")):
+    dangerous = re.compile(r"\b(?:bombs?|weapons?|drugs?|counterfeit|fake|replicas?)\b")
+    blocked = False
+    for match in dangerous.finditer(lowered):
+        prefix = lowered[max(0, match.start() - 50) : match.start()]
+        if not re.search(
+            r"\b(?:no|without|avoid|exclude|remove|do not include|don't include)\s+(?:any\s+|a\s+|the\s+)?$",
+            prefix,
+        ):
+            blocked = True
+            break
+    if blocked:
         return ComplianceResult(blocked=True, prompt=prompt)
     natural, marker, structured = prompt.partition(STRUCTURED_MARKER)
     warnings = [

@@ -49,7 +49,7 @@ async def test_evidence_request_declares_exact_check_ids(evidence_input):
     }
 
 
-@pytest.mark.parametrize("ids", [[], ["f1", "f1"], ["f1", "f_optional"], ["wrong"]])
+@pytest.mark.parametrize("ids", [[], ["wrong"]])
 async def test_evidence_corrects_id_mismatch_once(evidence_input, ids):
     transport = ScriptTransport([evidence_response(ids), evidence_response()])
     result = await VisionClient(transport, AgentConfig()).validate_evidence(*evidence_input)
@@ -66,8 +66,17 @@ async def test_evidence_repeated_mismatch_fails_with_id_details(evidence_input):
         await VisionClient(transport, AgentConfig()).validate_evidence(*evidence_input)
     assert len(transport.calls) == 2
     assert error.value.code == "provider_protocol"
-    for detail in ('missing=["f1"]', 'duplicated=["wrong"]', 'unknown=["wrong"]'):
-        assert detail in str(error.value)
+    assert 'missing=["f1"]' in str(error.value)
+
+
+@pytest.mark.parametrize("ids", [["f1", "f1"], ["f1", "f_optional"]])
+async def test_evidence_harmless_surplus_and_identical_duplicates_need_no_correction(
+    evidence_input, ids
+):
+    transport = ScriptTransport([evidence_response(ids)])
+    result = await VisionClient(transport, AgentConfig()).validate_evidence(*evidence_input)
+    assert [c.fact_id for c in result.fact_checks] == ["f1"]
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.parametrize("kind", ["transport", "http", "protocol"])

@@ -626,6 +626,8 @@ class PreparedContext(PreparedAnalysis):
     product_attributes: dict = Field(default_factory=dict)
     user_input: dict = Field(default_factory=dict)
     style_prompt: str | None = None
+    shoot_plan: dict = Field(default_factory=dict)
+    shoot_reference: LoadedMaterial | None = Field(default=None, exclude=True, repr=False)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -673,6 +675,7 @@ class QualityReport(GeneratedImageAudit):
     reviewed_subject_checks: list[SubjectCheck] = Field(default_factory=list)
     deterministic_checks: PixelChecks
     failed_checks: list[str]
+    critical_failed_checks: list[str] | None = None
 
 
 class DetailSetAudit(Model):
