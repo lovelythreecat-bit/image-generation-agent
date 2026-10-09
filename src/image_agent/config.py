@@ -18,6 +18,8 @@ VISION_STAGES = {
     "audit_image",
     "review_product",
     "audit_detail_set",
+    "plan_long_image",
+    "audit_long_image_asset",
 }
 LEGACY_FIELDS = {
     "openrouter_api_key",
