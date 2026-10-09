@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">image-agent — 商品图片创作工作台</title>
+  <desc id="desc">从多张商品素材出发，分析与选择，生成电商图片并审核；提供 Windows 桌面测试工具、CLI 和 Python API。</desc>
+  <rect width="1200" height="340" rx="24" fill="#FBF8F2"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+    <g id="context" fill="#726A5E" font-size="23" letter-spacing="2">
+      <text x="64" y="65">商品素材 / 创作 / 审核</text>
+    </g>
+    <g id="title-block" fill="#25241F">
+      <text x="59" y="168" font-size="92" font-weight="700" letter-spacing="-3">image-agent</text>
+      <text x="64" y="247" font-size="43" font-weight="600">从真实商品素材，开始电商图片创作。</text>
+    </g>
+    <text x="65" y="302" fill="#726A5E" font-size="22">Windows 工作台 · CLI · Python API</text>
+  </g>
+  <g id="material-frame" stroke="#EC6B35" stroke-width="5" fill="none" stroke-linecap="round">
+    <path d="M1037 63h-34v34 M1115 63h34v34 M1003 149v34h34 M1149 149v34h-34"/>
+    <rect x="1046" y="96" width="60" height="70" rx="8" stroke="#E5DFD5"/>
+    <path d="M1064 96V86h24v10"/>
+  </g>
+</svg>

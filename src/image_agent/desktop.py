@@ -57,6 +57,20 @@ STAGE_LABELS = {
     "generation_uncertain": "生成提交状态不确定",
 }
 
+# Keep the native controls and their keyboard behavior, with one shared visual theme.
+UI_COLORS = {
+    "background": "#F5F3EF",
+    "surface": "#FFFFFF",
+    "text": "#292622",
+    "muted": "#68625B",
+    "border": "#DED9D2",
+    "accent": "#B94312",
+    "accent_hover": "#A3360B",
+    "accent_soft": "#FFF0E6",
+    "field": "#FCFBF9",
+    "preview": "#F3F1ED",
+}
+
 
 class DesktopApp:
     def __init__(self, root: tk.Tk, *, project_dir: Path | None = None):
@@ -114,38 +128,45 @@ class DesktopApp:
     def _build(self):
         root = self.root
         root.title("Image Agent · 桌面测试工具")
-        width = min(1240, root.winfo_screenwidth() - 80)
-        height = min(860, root.winfo_screenheight() - 100)
+        width = min(1320, root.winfo_screenwidth() - 80)
+        height = min(900, root.winfo_screenheight() - 100)
         root.geometry(f"{width}x{height}")
         root.minsize(940, 620)
-        root.configure(background="#f4f6f8")
-        style = ttk.Style(root)
-        if "vista" in style.theme_names():
-            style.theme_use("vista")
-        style.configure("TLabel", font=("Microsoft YaHei UI", 10))
-        style.configure("TButton", padding=(10, 5))
-        style.configure("Heading.TLabel", font=("Microsoft YaHei UI", 18, "bold"))
-        style.configure("Muted.TLabel", foreground="#536477")
-        style.configure("TLabelframe.Label", font=("Microsoft YaHei UI", 10, "bold"))
-        style.configure("Treeview", rowheight=28)
+        root.configure(background=UI_COLORS["background"])
+        self._configure_theme()
         root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
-        header = ttk.Frame(root, padding=(20, 14))
+        header = ttk.Frame(root, padding=(24, 10, 24, 10))
+        self.header_frame = header
         header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(header, text="Image Agent", style="Heading.TLabel").pack(side="left")
-        ttk.Label(header, text="素材分析 / 图片生成 / 审核结果", style="Muted.TLabel").pack(
-            side="left", padx=20
+        brand = ttk.Frame(header)
+        brand.pack(side="left")
+        ttk.Label(brand, text="Image Agent", style="Heading.TLabel").pack(anchor="w")
+        self.header_subtitle = ttk.Label(
+            brand, text="从商品素材到上架图片，让创作更有章法。", style="Muted.TLabel"
         )
-        panes = ttk.Panedwindow(root, orient="horizontal")
-        panes.grid(row=1, column=0, sticky="nsew", padx=16)
-        left = ttk.Frame(panes, width=410)
+        self.header_subtitle.pack(anchor="w", pady=(4, 0))
+        ttk.Label(header, text="电商视觉工作台", style="Badge.TLabel").pack(side="right")
+        ttk.Separator(root).grid(row=0, column=0, sticky="ews")
+        panes = ttk.Panedwindow(root, orient="horizontal", style="Workspace.TPanedwindow")
+        self.workspace_panes = panes
+        panes.grid(row=1, column=0, sticky="nsew", padx=24, pady=(12, 0))
+        left = ttk.Frame(panes, width=392, style="Workspace.TFrame")
         panes.add(left, weight=0)
-        self.canvas = tk.Canvas(left, width=410, highlightthickness=0, background="#f4f6f8")
-        scroll = ttk.Scrollbar(left, orient="vertical", command=self.canvas.yview)
+        ttk.Label(left, text="任务配置", style="WorkspaceHeading.TLabel").pack(anchor="w")
+        ttk.Label(
+            left, text="按步骤准备素材、选择平台与生成规格", style="WorkspaceMuted.TLabel"
+        ).pack(anchor="w", pady=(2, 8))
+        form_area = ttk.Frame(left, style="Workspace.TFrame")
+        form_area.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(
+            form_area, width=392, highlightthickness=0, background=UI_COLORS["background"]
+        )
+        scroll = ttk.Scrollbar(form_area, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.form = ttk.Frame(self.canvas, padding=(0, 0, 12, 10))
+        self.form = ttk.Frame(self.canvas, padding=(0, 0, 8, 12), style="Workspace.TFrame")
         window = self.canvas.create_window((0, 0), window=self.form, anchor="nw")
         self.form.bind(
             "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -153,26 +174,51 @@ class DesktopApp:
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(window, width=e.width))
         self.root.bind("<MouseWheel>", self._wheel, add="+")
 
-        materials = self._section("1  素材与商品")
+        materials = self._section("01", "素材与商品", "添加商品图片，填写本次创作信息")
         actions = ttk.Frame(materials)
         actions.pack(fill="x")
-        ttk.Button(actions, text="添加图片", command=self.choose_materials).pack(side="left")
+        ttk.Button(
+            actions, text="+ 添加图片", command=self.choose_materials, style="Soft.TButton"
+        ).pack(side="left")
         ttk.Button(actions, text="移除选中", command=self.remove_materials).pack(
             side="left", padx=6
         )
         ttk.Label(actions, text="1–8 张", style="Muted.TLabel").pack(side="right")
         self.material_list = tk.Listbox(
-            materials, height=4, selectmode="extended", exportselection=False
+            materials,
+            height=2,
+            selectmode="extended",
+            exportselection=False,
+            font=("Microsoft YaHei UI", 10),
+            background=UI_COLORS["field"],
+            foreground=UI_COLORS["text"],
+            selectbackground=UI_COLORS["accent_soft"],
+            selectforeground=UI_COLORS["accent"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=UI_COLORS["border"],
+            highlightcolor=UI_COLORS["accent"],
+            activestyle="none",
         )
-        self.material_list.pack(fill="x", pady=8)
+        self.material_list.pack(fill="x", pady=(6, 2))
         self.material_list.bind("<<ListboxSelect>>", self.preview_material)
-        self._entry(materials, "商品名称 *", self.fields["product_name"])
-        self._entry(materials, "商品分类 *", self.fields["category"])
-        ttk.Label(materials, text="创作要求 / 提示词").pack(anchor="w", pady=(7, 3))
-        self.brief = ScrolledText(materials, height=4, wrap="word", font=("Microsoft YaHei UI", 10))
+        product_fields = ttk.Frame(materials)
+        product_fields.pack(fill="x")
+        product_fields.columnconfigure(0, weight=1, uniform="product")
+        product_fields.columnconfigure(1, weight=1, uniform="product")
+        for column, (label, key) in enumerate(
+            (("商品名称 *", "product_name"), ("商品分类 *", "category"))
+        ):
+            field = ttk.Frame(product_fields)
+            field.grid(row=0, column=column, sticky="ew", padx=(0, 8) if column == 0 else 0)
+            self._entry(field, label, self.fields[key]).configure(width=14)
+        ttk.Label(materials, text="创作要求 / 提示词").pack(anchor="w", pady=(6, 3))
+        self.brief = self._text_area(materials, height=3)
         self.brief.pack(fill="x")
 
-        targets = self._section("2  生成设置")
+        targets = self._section("02", "生成设置", "选择销售平台与所需图片")
+        ttk.Label(targets, text="销售平台", style="Field.TLabel").pack(anchor="w", pady=(0, 6))
         grid = ttk.Frame(targets)
         grid.pack(fill="x")
         for index, (name, var) in enumerate(self.platforms.items()):
@@ -180,6 +226,7 @@ class DesktopApp:
                 row=index // 3, column=index % 3, sticky="w", padx=(0, 8), pady=2
             )
         ttk.Separator(targets).pack(fill="x", pady=8)
+        ttk.Label(targets, text="图片类型", style="Field.TLabel").pack(anchor="w", pady=(0, 4))
         for name, var in self.outputs.items():
             ttk.Checkbutton(targets, text=OUTPUT_LABELS[name], variable=var).pack(anchor="w")
         ttk.Label(
@@ -197,7 +244,7 @@ class DesktopApp:
             ("auto", "1:1", "3:4", "4:5", "9:16", "16:9", "4:1", "1:4"),
         )
 
-        api = self._section("3  API 配置与输出")
+        api = self._section("03", "API 配置与输出", "连接服务，管理输出与已有任务")
         self._entry(api, "配置文件（JSON）", self.config_path)
         buttons = ttk.Frame(api)
         buttons.pack(fill="x", pady=4)
@@ -220,23 +267,29 @@ class DesktopApp:
             side="left", padx=6
         )
 
-        right = ttk.Frame(panes, padding=(12, 0, 0, 0))
+        right = ttk.Frame(panes, padding=(20, 0, 0, 0), style="Workspace.TFrame")
         panes.add(right, weight=1)
+        right_heading = ttk.Frame(right, style="Workspace.TFrame")
+        self.right_heading = right_heading
+        right_heading.pack(fill="x", pady=(0, 8))
+        ttk.Label(right_heading, text="预览与交付", style="WorkspaceHeading.TLabel").pack(
+            anchor="w"
+        )
         self.notebook = ttk.Notebook(right)
         self.notebook.pack(fill="both", expand=True)
-        result_tab = ttk.Frame(self.notebook, padding=10)
+        result_tab = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(result_tab, text="图片预览")
         self.result_tree = ttk.Treeview(
             result_tab,
             columns=("platform", "type", "status"),
             show="headings",
-            height=5,
+            height=4,
             selectmode="browse",
         )
         for key, title, size in (
             ("platform", "平台", 90),
-            ("type", "图片类型", 180),
-            ("status", "结果", 90),
+            ("type", "图片类型", 200),
+            ("status", "审核结果", 160),
         ):
             self.result_tree.heading(key, text=title)
             self.result_tree.column(key, width=size, minwidth=70)
@@ -244,42 +297,58 @@ class DesktopApp:
         self.result_tree.configure(yscrollcommand=tree_scroll.set)
         self.result_tree.grid(row=0, column=0, sticky="ew")
         tree_scroll.grid(row=0, column=1, sticky="ns")
-        self.asset_notice = ttk.Label(result_tab, text="", wraplength=400, foreground="#915600")
+        self.asset_notice = ttk.Label(result_tab, text="", wraplength=400, style="Notice.TLabel")
         self.asset_notice.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         candidate_controls = ttk.Frame(result_tab)
-        candidate_controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=6)
-        ttk.Label(candidate_controls, text="候选历史（选择后预览）").pack(anchor="w")
-        self.candidate_choice = ttk.Combobox(candidate_controls, state="readonly")
-        self.candidate_choice.pack(fill="x")
-        self.candidate_choice.bind("<<ComboboxSelected>>", self.preview_candidate)
-        ttk.Label(candidate_controls, text="人工接受原因（必填；不会改为自动审核通过）").pack(
-            anchor="w", pady=(5, 0)
+        candidate_controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        candidate_controls.columnconfigure(1, weight=1)
+        ttk.Label(candidate_controls, text="候选历史", style="Field.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 8)
         )
+        self.candidate_choice = ttk.Combobox(candidate_controls, state="readonly")
+        self.candidate_choice.grid(row=0, column=1, columnspan=2, sticky="ew")
+        self.candidate_choice.bind("<<ComboboxSelected>>", self.preview_candidate)
+        ttk.Label(
+            candidate_controls,
+            text="接受原因 *",
+            style="Field.TLabel",
+        ).grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
         self.reason_entry = ttk.Entry(candidate_controls, textvariable=self.accept_reason)
-        self.reason_entry.pack(fill="x")
+        self.reason_entry.grid(row=1, column=1, sticky="ew", pady=(6, 0))
         self.accept_button = ttk.Button(
             candidate_controls,
             text="人工接受所选候选",
             command=self.accept_selected,
             state="disabled",
         )
-        self.accept_button.pack(anchor="w", pady=(5, 0))
+        self.accept_button.grid(row=1, column=2, padx=(8, 0), pady=(6, 0), sticky="e")
+        ttk.Label(
+            candidate_controls,
+            text="人工接受需填写原因，结果仍标记为人工接受，不会改为自动审核通过。",
+            style="Muted.TLabel",
+            wraplength=560,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self.preview = tk.Label(
             result_tab,
-            text="添加素材后可预览\n生成图片将在这里展示",
-            background="#eef2f6",
-            foreground="#536477",
+            text="准备好展示你的商品\n\n添加素材后可预览，生成图片将在这里展示",
+            background=UI_COLORS["preview"],
+            foreground=UI_COLORS["muted"],
             font=("Microsoft YaHei UI", 12),
             compound="center",
             wraplength=400,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=UI_COLORS["border"],
         )
         self.preview.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
         result_tab.rowconfigure(3, weight=1)
         result_tab.columnconfigure(0, weight=1)
         self.preview.bind("<Configure>", self._resize_preview)
+        result_tab.bind("<Configure>", self._fit_result_table)
         self.result_tree.bind("<<TreeviewSelect>>", self.preview_asset)
 
-        analysis_tab = ttk.Frame(self.notebook, padding=10)
+        analysis_tab = ttk.Frame(self.notebook, padding=16)
         self.notebook.add(analysis_tab, text="素材分析 / 澄清")
         ttk.Label(
             analysis_tab, text="需要澄清时选择方案，再点击「生成图片」。", style="Muted.TLabel"
@@ -287,15 +356,11 @@ class DesktopApp:
         self.choice = ttk.Combobox(analysis_tab, state="readonly", values=("自动选择",))
         self.choice.current(0)
         self.choice.pack(fill="x", pady=(0, 8))
-        self.analysis_text = ScrolledText(
-            analysis_tab, wrap="word", font=("Consolas", 10), state="disabled"
-        )
+        self.analysis_text = self._text_area(analysis_tab, code=True, state="disabled")
         self.analysis_text.pack(fill="both", expand=True)
-        self.json_text = ScrolledText(
-            self.notebook, wrap="word", font=("Consolas", 10), state="disabled"
-        )
+        self.json_text = self._text_area(self.notebook, code=True, state="disabled")
         self.notebook.add(self.json_text, text="结果 / 审核 JSON")
-        creative_tab = ttk.Frame(self.notebook, padding=10)
+        creative_tab = ttk.Frame(self.notebook, padding=16)
         self.notebook.add(creative_tab, text="创作策划")
         ttk.Label(
             creative_tab,
@@ -303,20 +368,19 @@ class DesktopApp:
             style="Muted.TLabel",
             wraplength=650,
         ).pack(anchor="w", pady=(0, 8))
-        self.creative_text = ScrolledText(
-            creative_tab, wrap="word", font=("Microsoft YaHei UI", 10), state="disabled"
-        )
+        self.creative_text = self._text_area(creative_tab, state="disabled")
         self.creative_text.pack(fill="both", expand=True)
         self.show_creative_plan(None)
 
-        footer = ttk.Frame(root, padding=(20, 12))
-        footer.grid(row=2, column=0, sticky="ew")
+        footer = ttk.Frame(root, padding=(24, 10))
+        self.footer_frame = footer
+        footer.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         self.analyze_button = ttk.Button(
-            footer, text="分析素材", command=lambda: self.start("analyze")
+            footer, text="分析素材", command=lambda: self.start("analyze"), style="Soft.TButton"
         )
         self.analyze_button.pack(side="left")
         self.generate_button = ttk.Button(
-            footer, text="生成图片", command=lambda: self.start("create")
+            footer, text="生成图片", command=lambda: self.start("create"), style="Primary.TButton"
         )
         self.generate_button.pack(side="left", padx=8)
         self.cancel_button = ttk.Button(
@@ -328,19 +392,253 @@ class DesktopApp:
             side="right", padx=8
         )
         self.progress = ttk.Progressbar(root, mode="indeterminate")
-        self.progress.grid(row=3, column=0, sticky="ew", padx=20)
-        ttk.Label(root, textvariable=self.status, wraplength=900, padding=(20, 8)).grid(
-            row=4, column=0, sticky="ew"
+        self.progress.grid(row=3, column=0, sticky="ew")
+        ttk.Label(
+            root, textvariable=self.status, wraplength=1200, padding=(24, 8), style="Muted.TLabel"
+        ).grid(row=4, column=0, sticky="ew")
+        self.compact_layout = False
+        root.bind("<Configure>", self._fit_window, add="+")
+
+    def _configure_theme(self):
+        colors = UI_COLORS
+        font = ("Microsoft YaHei UI", 10)
+        style = ttk.Style(self.root)
+        # Clam lets the palette apply consistently on Windows as well as Linux/macOS.
+        style.theme_use("clam")
+        style.configure(".", font=font, foreground=colors["text"], background=colors["surface"])
+        style.configure("TFrame", background=colors["surface"])
+        style.configure("Workspace.TFrame", background=colors["background"])
+        style.configure(
+            "Card.TFrame",
+            borderwidth=1,
+            relief="solid",
+            bordercolor=colors["border"],
+            background=colors["surface"],
+        )
+        style.configure("TLabel", background=colors["surface"], foreground=colors["text"])
+        style.configure("Heading.TLabel", font=("Microsoft YaHei UI", 20, "bold"))
+        style.configure("Section.TLabel", font=("Microsoft YaHei UI", 11, "bold"))
+        style.configure("Field.TLabel", font=font)
+        style.configure("Muted.TLabel", foreground=colors["muted"], font=font)
+        style.configure(
+            "WorkspaceHeading.TLabel",
+            background=colors["background"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        style.configure(
+            "WorkspaceMuted.TLabel", background=colors["background"], foreground=colors["muted"]
+        )
+        style.configure(
+            "Badge.TLabel",
+            background=colors["accent_soft"],
+            foreground=colors["accent"],
+            padding=(14, 8),
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.configure(
+            "Step.TLabel",
+            background=colors["accent_soft"],
+            foreground=colors["accent"],
+            padding=(6, 3),
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.configure("Notice.TLabel", foreground="#87520D")
+        style.configure(
+            "TButton",
+            padding=(10, 5),
+            background=colors["surface"],
+            bordercolor=colors["border"],
+            lightcolor=colors["surface"],
+            darkcolor=colors["surface"],
+            relief="flat",
+            focusthickness=2,
+            focuscolor=colors["accent"],
+        )
+        style.map(
+            "TButton",
+            background=[("disabled", "#F2F0EC"), ("pressed", "#EDE9E2"), ("active", "#F6F3EF")],
+            foreground=[("disabled", "#827B72")],
+            bordercolor=[("focus", colors["accent"])],
+        )
+        style.configure(
+            "Primary.TButton",
+            background=colors["accent"],
+            foreground="white",
+            bordercolor=colors["accent"],
+            lightcolor=colors["accent"],
+            darkcolor=colors["accent"],
+            padding=(24, 9),
+            font=("Microsoft YaHei UI", 10, "bold"),
+            focuscolor="white",
+        )
+        style.map(
+            "Primary.TButton",
+            background=[
+                ("disabled", "#E8D4C9"),
+                ("pressed", "#92310D"),
+                ("active", colors["accent_hover"]),
+            ],
+            foreground=[("disabled", "#765E50"), ("!disabled", "white")],
+            bordercolor=[("disabled", "#E8D4C9"), ("!disabled", colors["accent"])],
+        )
+        style.configure(
+            "Soft.TButton",
+            background=colors["accent_soft"],
+            foreground=colors["accent"],
+            bordercolor="#EBCABB",
+        )
+        style.map(
+            "Soft.TButton",
+            background=[("disabled", "#F2F0EC"), ("pressed", "#F8DDCE"), ("active", "#FFE5D7")],
+        )
+        for name in ("TEntry", "TCombobox"):
+            style.configure(
+                name,
+                padding=(8, 4),
+                fieldbackground=colors["field"],
+                foreground=colors["text"],
+                bordercolor=colors["border"],
+                lightcolor=colors["border"],
+                darkcolor=colors["border"],
+                insertcolor=colors["text"],
+                arrowcolor=colors["muted"],
+            )
+            style.map(
+                name,
+                bordercolor=[("focus", colors["accent"])],
+                lightcolor=[("focus", colors["accent"])],
+                darkcolor=[("focus", colors["accent"])],
+                fieldbackground=[("disabled", "#F2F0EC"), ("readonly", colors["field"])],
+                foreground=[("disabled", "#827B72"), ("readonly", colors["text"])],
+                selectbackground=[("!focus", colors["field"]), ("focus", colors["accent_soft"])],
+                selectforeground=[("!focus", colors["text"]), ("focus", colors["accent"])],
+            )
+        style.configure(
+            "TCheckbutton",
+            padding=(0, 3),
+            focuscolor=colors["accent"],
+            indicatorbackground=colors["field"],
+            indicatorforeground="white",
+        )
+        style.map(
+            "TCheckbutton",
+            background=[("active", colors["surface"])],
+            foreground=[("disabled", "#827B72"), ("selected", colors["accent"])],
+            indicatorbackground=[("selected", colors["accent"])],
+            indicatorforeground=[("selected", "white")],
+        )
+        style.configure("TSeparator", background=colors["border"])
+        style.configure("Workspace.TPanedwindow", background=colors["background"])
+        style.configure("Sash", sashthickness=4, gripcount=0)
+        style.configure(
+            "TNotebook",
+            background=colors["background"],
+            bordercolor=colors["border"],
+            tabmargins=(0, 0, 0, 0),
+        )
+        style.configure(
+            "TNotebook.Tab",
+            padding=(16, 10),
+            background=colors["background"],
+            bordercolor=colors["border"],
+            foreground=colors["muted"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            focuscolor=colors["accent"],
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", colors["surface"]), ("active", colors["accent_soft"])],
+            foreground=[("selected", colors["accent"]), ("active", colors["accent"])],
+        )
+        style.configure(
+            "Treeview",
+            background=colors["surface"],
+            fieldbackground=colors["surface"],
+            foreground=colors["text"],
+            rowheight=28,
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", colors["accent_soft"])],
+            foreground=[("selected", colors["accent"])],
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=colors["field"],
+            foreground=colors["muted"],
+            padding=(10, 8),
+            relief="flat",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.map("Treeview.Heading", background=[("active", "#EDE9E2")])
+        style.configure(
+            "Vertical.TScrollbar",
+            background="#D5CFC6",
+            troughcolor=colors["background"],
+            bordercolor=colors["background"],
+            arrowcolor=colors["muted"],
+            relief="flat",
+            width=12,
+        )
+        style.configure(
+            "Horizontal.TProgressbar",
+            background=colors["accent"],
+            troughcolor=colors["surface"],
+            bordercolor=colors["surface"],
+            lightcolor=colors["accent"],
+            darkcolor=colors["accent"],
+            thickness=3,
+        )
+        self.root.option_add("*TCombobox*Listbox.font", font)
+        self.root.option_add("*TCombobox*Listbox.background", colors["surface"])
+        self.root.option_add("*TCombobox*Listbox.foreground", colors["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", colors["accent_soft"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", colors["accent"])
+
+    @staticmethod
+    def _text_area(parent, *, code=False, **kwargs):
+        return ScrolledText(
+            parent,
+            wrap="word",
+            font=("Consolas" if code else "Microsoft YaHei UI", 10),
+            background=UI_COLORS["field"],
+            foreground=UI_COLORS["text"],
+            insertbackground=UI_COLORS["text"],
+            selectbackground=UI_COLORS["accent_soft"],
+            selectforeground=UI_COLORS["accent"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=UI_COLORS["border"],
+            highlightcolor=UI_COLORS["accent"],
+            padx=10,
+            pady=8,
+            spacing1=2,
+            spacing3=2,
+            **kwargs,
         )
 
-    def _section(self, title):
-        frame = ttk.LabelFrame(self.form, text=title, padding=12)
-        frame.pack(fill="x", pady=(0, 12))
-        return frame
+    def _section(self, number, title, description):
+        card = ttk.Frame(self.form, style="Card.TFrame", padding=12)
+        card.pack(fill="x", pady=(0, 12))
+        heading = ttk.Frame(card)
+        heading.pack(fill="x")
+        ttk.Label(heading, text=number, style="Step.TLabel").pack(side="left", padx=(0, 8))
+        ttk.Label(heading, text=title, style="Section.TLabel").pack(side="left")
+        ttk.Label(card, text=description, style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
+        body = ttk.Frame(card)
+        body.pack(fill="x")
+        return body
 
     @staticmethod
     def _entry(parent, label, variable, *, password=False):
-        ttk.Label(parent, text=label, wraplength=345).pack(anchor="w", pady=(5, 3))
+        ttk.Label(parent, text=label, wraplength=345, style="Field.TLabel").pack(
+            anchor="w", pady=(6, 3)
+        )
         entry = ttk.Entry(parent, textvariable=variable, show="*" if password else "")
         entry.pack(fill="x")
         return entry
@@ -354,6 +652,30 @@ class DesktopApp:
         )
         combo.pack(side="right")
         return combo
+
+    def _fit_result_table(self, event):
+        # Preserve room for the image on small windows; the list remains scrollable.
+        rows = 1 if self.compact_layout else (4 if event.height >= 480 else 2)
+        if int(self.result_tree.cget("height")) != rows:
+            self.result_tree.configure(height=rows)
+
+    def _fit_window(self, event):
+        if event.widget != self.root:
+            return
+        compact = event.height < 760
+        if compact == self.compact_layout:
+            return
+        self.compact_layout = compact
+        vertical = 6 if compact else 10
+        self.header_frame.configure(padding=(24, vertical, 24, vertical))
+        self.footer_frame.configure(padding=(24, vertical))
+        self.workspace_panes.grid_configure(pady=(8 if compact else 12, 0))
+        if compact:
+            self.header_subtitle.pack_forget()
+            self.right_heading.pack_forget()
+        else:
+            self.header_subtitle.pack(anchor="w", pady=(4, 0))
+            self.right_heading.pack(before=self.notebook, fill="x", pady=(0, 8))
 
     def _wheel(self, event):
         widget = event.widget
