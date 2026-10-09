@@ -1,0 +1,415 @@
+{
+  "$defs": {
+    "LongImageOptionsDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "default": 750,
+          "maximum": 2400,
+          "minimum": 400,
+          "title": "Width",
+          "type": "integer"
+        },
+        "theme": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "clean",
+            "warm",
+            "premium"
+          ],
+          "title": "Theme",
+          "type": "string"
+        },
+        "slice_height": {
+          "default": 1500,
+          "maximum": 4000,
+          "minimum": 500,
+          "title": "Slice Height",
+          "type": "integer"
+        },
+        "font_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Id"
+        }
+      },
+      "title": "LongImageOptionsDTO",
+      "type": "object"
+    },
+    "LongProductContext": {
+      "additionalProperties": false,
+      "properties": {
+        "product_name": {
+          "minLength": 1,
+          "title": "Product Name",
+          "type": "string"
+        },
+        "category": {
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "enum": [
+                "amazon",
+                "taobao",
+                "tmall",
+                "jd",
+                "pinduoduo",
+                "shopee",
+                "lazada",
+                "shein",
+                "temu"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Platform"
+        },
+        "presentation_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "model_wear",
+            "product_only"
+          ],
+          "title": "Presentation Mode",
+          "type": "string"
+        },
+        "model_preference": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "female",
+            "male",
+            "no_face"
+          ],
+          "title": "Model Preference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_name",
+        "category"
+      ],
+      "title": "LongProductContext",
+      "type": "object"
+    },
+    "LongProductSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "LongProductSpec",
+      "type": "object"
+    },
+    "LongRequiredCopy": {
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "section_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section Hint"
+        },
+        "occurrences": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Occurrences",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "text"
+      ],
+      "title": "LongRequiredCopy",
+      "type": "object"
+    },
+    "MaterialDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Material Id",
+          "type": "string"
+        },
+        "media_id": {
+          "minLength": 1,
+          "title": "Media Id",
+          "type": "string"
+        },
+        "role_hint": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "identity",
+            "detail",
+            "accessory",
+            "scene",
+            "style"
+          ],
+          "title": "Role Hint",
+          "type": "string"
+        },
+        "subject_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Hint"
+        },
+        "element_hints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Element Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "material_id",
+        "media_id"
+      ],
+      "title": "MaterialDTO",
+      "type": "object"
+    },
+    "SelectionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "explicit"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "subject_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Subject Ids",
+          "type": "array"
+        },
+        "required_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Required Element Ids",
+          "type": "array"
+        },
+        "preferred_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Preferred Element Ids",
+          "type": "array"
+        },
+        "excluded_element_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "type": "string"
+          },
+          "title": "Excluded Element Ids",
+          "type": "array"
+        }
+      },
+      "title": "SelectionSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "task_type": {
+      "const": "long_image",
+      "default": "long_image",
+      "title": "Task Type",
+      "type": "string"
+    },
+    "scene": {
+      "enum": [
+        "product_detail",
+        "brand_intro",
+        "promotion",
+        "tutorial",
+        "comparison",
+        "custom"
+      ],
+      "title": "Scene",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "content_brief": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "title": "Content Brief",
+      "type": "string"
+    },
+    "materials": {
+      "items": {
+        "$ref": "#/$defs/MaterialDTO"
+      },
+      "maxItems": 8,
+      "title": "Materials",
+      "type": "array"
+    },
+    "style_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Style Hint"
+    },
+    "product_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LongProductContext"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "product_specs": {
+      "items": {
+        "$ref": "#/$defs/LongProductSpec"
+      },
+      "maxItems": 30,
+      "title": "Product Specs",
+      "type": "array"
+    },
+    "service_notes": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Service Notes",
+      "type": "array"
+    },
+    "required_copy": {
+      "items": {
+        "$ref": "#/$defs/LongRequiredCopy"
+      },
+      "title": "Required Copy",
+      "type": "array"
+    },
+    "selection": {
+      "$ref": "#/$defs/SelectionSpec"
+    },
+    "options": {
+      "$ref": "#/$defs/LongImageOptionsDTO"
+    },
+    "image_model": {
+      "default": "pro",
+      "enum": [
+        "pro",
+        "fast",
+        "base"
+      ],
+      "title": "Image Model",
+      "type": "string"
+    },
+    "image_size": {
+      "default": "2K",
+      "enum": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "title": "Image Size",
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    }
+  },
+  "required": [
+    "scene",
+    "title",
+    "content_brief"
+  ],
+  "title": "LongImageRequestDTO",
+  "type": "object"
+}
