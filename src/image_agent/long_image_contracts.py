@@ -260,12 +260,32 @@ def long_result_to_bundle(result: LongImageResult) -> LongImageResultBundle:
                 {k: v for k, v in candidate.items() if k in LongCandidateDTO.model_fields}
             )
             candidate_id = candidate_data.get("candidate_id")
+            candidate_data["selected"] = candidate_id == asset.selected_candidate_id
             # Validate safe IDs before using them in blob namespaces.
             parsed = LongCandidateDTO(**candidate_data)
+            if asset._candidate_payloads is None:
+                # Compatibility for locally constructed, non-store results.
+                image = candidate.get("image", candidate.get("data"))
+                if image is not None and candidate.get("sha256") not in (
+                    None,
+                    hashlib.sha256(image).hexdigest(),
+                ):
+                    image = None
+            else:
+                payload = asset._candidate_payloads.get(candidate_id)
+                image = None
+                if payload is not None:
+                    path, sha256, value = payload
+                    if (
+                        path == candidate.get("file_path")
+                        and sha256 == candidate.get("sha256")
+                        and hashlib.sha256(value).hexdigest() == sha256
+                    ):
+                        image = value
             candidates.append(
                 attach(
-                    parsed.model_dump(),
-                    candidate.get("image", candidate.get("data")),
+                    parsed.model_dump() | {"blob_id": None, "mime_type": None, "byte_length": None},
+                    image,
                     f"candidate/{asset.slot_id}/{candidate_id}",
                 )
             )

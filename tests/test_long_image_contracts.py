@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -239,3 +240,109 @@ def test_duplicate_blob_ids_are_rejected():
     )
     with pytest.raises(AgentError, match="duplicate"):
         long_result_to_bundle(result)
+
+
+def test_candidate_selection_comes_from_asset_choice():
+    result = LongImageResult(
+        status="succeeded",
+        image_assets=[
+            {
+                "slot_id": "pic",
+                "source": "generate",
+                "status": "succeeded",
+                "selected_candidate_id": "c2",
+                "candidates": [
+                    {"candidate_id": "c1", "selected": True},
+                    {"candidate_id": "c2", "selected": False},
+                ],
+            }
+        ],
+    )
+    assert [c.selected for c in long_result_to_bundle(result).dto.image_assets[0].candidates] == [
+        False,
+        True,
+    ]
+    result.image_assets[0].selected_candidate_id = None
+    assert not any(c.selected for c in long_result_to_bundle(result).dto.image_assets[0].candidates)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])
+async def test_repaired_run_delivers_verified_candidate_history(tmp_path, persisted):
+    from image_agent import AgentConfig, ExecutionPolicy
+    from image_agent.long_image_runtime import accept_long_image_candidate, execute_long_image
+    from image_agent.long_image_store import LongImageRunStore
+    from tests.test_long_image_pipeline import Transport, deps_for, png, request_plan
+
+    request, plan = request_plan()
+    store = LongImageRunStore(tmp_path if persisted else None)
+
+    class RepairTransport(Transport):
+        async def post_json(self, path, payload):
+            if path == "/images" and self.posts:
+                self.image = png(800)
+            return await super().post_json(path, payload)
+
+    transport = RepairTransport(audits=[False, True])
+    result = await execute_long_image(
+        request,
+        AgentConfig(),
+        plan=plan,
+        dependencies=deps_for(transport),
+        policy=ExecutionPolicy(max_quality_repairs=1),
+        store=store,
+    )
+    assert result.status == "succeeded"
+    posts = len(transport.posts)
+    assert posts == 4
+    expected = [png(), png(800)]
+
+    def check_bundle(value, selected):
+        bundle = long_result_to_bundle(value)
+        candidates = bundle.dto.image_assets[0].candidates
+        assert len(candidates) == 2
+        assert all(c.blob_id in bundle.blobs for c in candidates)
+        assert len({c.blob_id for c in candidates}) == 2
+        assert [c.selected for c in candidates] == selected
+        for candidate, image in zip(candidates, expected, strict=True):
+            assert bundle.blobs[candidate.blob_id] == image
+            assert candidate.mime_type == "image/png"
+            assert candidate.byte_length == len(image)
+            assert candidate.sha256 == hashlib.sha256(image).hexdigest()
+        encoded = bundle.dto.model_dump_json()
+        assert "file_path" not in encoded and "candidate_payload" not in encoded
+        assert str(tmp_path) not in encoded and "b64" not in encoded
+        assert LongImageResultDTO.model_validate_json(encoded) == bundle.dto
+        return candidates
+
+    check_bundle(result, [False, True])
+    loaded = (LongImageRunStore(tmp_path) if persisted else store).hydrate_result()
+    check_bundle(loaded, [False, True])
+    check_bundle(loaded.model_copy(deep=True), [False, True])
+    # Local payloads never enter checkpoints/manifests or ordinary model dumps.
+    for value in (
+        result.model_dump(),
+        result.model_dump(mode="json"),
+        store.json("state.json"),
+        store.json("result.json"),
+    ):
+        encoded = json.dumps(value)
+        assert "candidate_payload" not in encoded and "b64" not in encoded
+        assert '"image"' not in encoded and '"data"' not in encoded
+    if persisted:
+        accepted = await accept_long_image_candidate(
+            tmp_path, "illustration", "c0001", reason="reviewed history"
+        )
+        candidates = check_bundle(accepted, [True, False])
+        assert accepted.status == "accepted" and candidates[0].status == "accepted"
+        assert candidates[0].acceptance["reason"] == "reviewed history"
+        assert candidates[0].acceptance["at"]
+        check_bundle(LongImageRunStore(tmp_path).hydrate_result(), [True, False])
+    # A corrupt historical file invalidates the snapshot, including all cached
+    # candidate and selected payloads; local hydration/export never submits POSTs.
+    store.write(result.image_assets[0].candidates[1]["file_path"], b"corrupt history")
+    damaged = store.hydrate_result()
+    assert damaged.status == "failed" and damaged.output_errors
+    assert damaged.page.availability == "stale"
+    assert not long_result_to_bundle(damaged).blobs
+    assert len(transport.posts) == posts

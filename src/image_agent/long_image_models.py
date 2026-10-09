@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StrictBool, field_validator, model_validator
+from pydantic import Field, PrivateAttr, StrictBool, field_validator, model_validator
 
 from .models import (
     AssetStatus,
@@ -354,6 +354,11 @@ class LongImageUsage(Model):
 
 
 class LongSlotAsset(Model):
+    # Store-verified local payloads: candidate ID -> (relative path, hash, bytes).
+    # None preserves the legacy local inline adapter; {} means hydration was
+    # attempted and no fallback to unverified inline candidate bytes is allowed.
+    _candidate_payloads: dict[str, tuple[str, str, bytes]] | None = PrivateAttr(default=None)
+
     slot_id: Id
     source: Literal["source", "generate"]
     source_status: Literal["available", "missing", "invalid"] | None = None

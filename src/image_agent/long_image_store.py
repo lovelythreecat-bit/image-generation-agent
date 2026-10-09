@@ -523,12 +523,18 @@ class LongImageRunStore(RunStore):
         return result
 
     def _hydrate_asset(self, asset):
+        # Publish bytes only after the entire asset validates. Rehydrating a
+        # previously valid object must not retain its cache on any failure.
+        asset.image = None
+        asset._candidate_payloads = {}
         candidates = {}
+        payloads = {}
         for candidate in asset.candidates:
             cid = candidate.get("candidate_id")
             if not cid or cid in candidates:
                 raise OutputError("candidate IDs are missing or duplicated")
-            self.read({"path": candidate["file_path"], "sha256": candidate["sha256"]})
+            data = self.read({"path": candidate["file_path"], "sha256": candidate["sha256"]})
+            payloads[cid] = (candidate["file_path"], candidate["sha256"], data)
             candidates[cid] = candidate
         if (
             asset.source == "generate"
@@ -548,10 +554,11 @@ class LongImageRunStore(RunStore):
             ):
                 raise OutputError("selected asset differs from selected candidate")
             asset.file_path, asset.sha256 = selected["file_path"], selected["sha256"]
+        image = None
         if asset.file_path or asset.sha256:
             if not asset.file_path or not asset.sha256:
                 raise OutputError("selected asset has an incomplete file binding")
-            asset.image = self.read({"path": asset.file_path, "sha256": asset.sha256})
+            image = self.read({"path": asset.file_path, "sha256": asset.sha256})
             if asset.source == "source" and not any(
                 ref["path"] == asset.file_path and ref["sha256"] == asset.sha256
                 for ref in self.load_metadata()["inputs"]
@@ -561,6 +568,8 @@ class LongImageRunStore(RunStore):
             raise OutputError("source asset marked available without persisted bytes")
         elif asset.source == "generate" and asset.status in ("succeeded", "accepted"):
             raise OutputError("successful generated asset has no selected candidate")
+        asset.image = image
+        asset._candidate_payloads = payloads
         return asset
 
     def validate_inputs_and_candidates(self):
@@ -633,6 +642,7 @@ class LongImageRunStore(RunStore):
             # Never return unverified bytes from a corrupt snapshot.
             for asset in result.image_assets:
                 asset.image = None
+                asset._candidate_payloads = {}
             for artifact in self._artifacts(result):
                 artifact.image = None
             return result

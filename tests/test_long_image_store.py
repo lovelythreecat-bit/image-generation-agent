@@ -222,7 +222,11 @@ def delivery(store, plan, status="succeeded"):
 
     def artifact(aid, kind, dependencies):
         return LongImageArtifact(
-            artifact_id=aid, kind=kind, image=data, width=20, height=10,
+            artifact_id=aid,
+            kind=kind,
+            image=data,
+            width=20,
+            height=10,
             dependencies=dependencies,
         )
 
@@ -234,7 +238,9 @@ def delivery(store, plan, status="succeeded"):
         checks=[{"code": "layout", "passed": True}],
     )
     result = LongImageResult(
-        status=status, plan=plan, image_assets=[asset],
+        status=status,
+        plan=plan,
+        image_assets=[asset],
         sections=[
             rendered.sections[0].model_copy(update={"status": status}),
             rendered.sections[1].model_copy(update={"status": "succeeded"}),
@@ -251,6 +257,56 @@ def saved_delivery(tmp_path, status="succeeded"):
     )
     store.commit_delivery_revision(result, rendered)
     return store, request, result, rendered
+
+
+@pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize("damage", ["bytes", "path", "hash", "duplicate"])
+def test_candidate_hydration_clears_cached_bytes_on_failure(tmp_path, persisted, damage):
+    from image_agent.long_image_contracts import long_result_to_bundle
+
+    store, _, plan = initialized(tmp_path if persisted else None)
+    result, _ = delivery(store, plan)
+    asset = result.image_assets[0]
+    ref = store.write("candidates/slot/c2.png", picture((20, 10), "red"))
+    asset.candidates.append(
+        {"candidate_id": "c2", "file_path": ref["path"], "sha256": ref["sha256"]}
+    )
+    store._hydrate_asset(asset)
+    # Old local inline adapters must never bypass failed store verification.
+    asset.candidates[1]["image"] = picture((20, 10), "red")
+    if damage == "bytes":
+        store.write(ref["path"], b"damaged")
+    elif damage == "path":
+        asset.candidates[1]["file_path"] = "../outside.png"
+    elif damage == "hash":
+        asset.candidates[1]["sha256"] = "0" * 64
+    else:
+        asset.candidates[1]["candidate_id"] = "c1"
+    with pytest.raises(OutputError):
+        store._hydrate_asset(asset)
+    assert asset.image is None
+    if damage != "duplicate":
+        bundle = long_result_to_bundle(result)
+        assert not bundle.blobs
+        assert all(c.blob_id is None for c in bundle.dto.image_assets[0].candidates)
+
+
+@pytest.mark.parametrize("change", ["path", "hash", "id"])
+def test_candidate_export_rejects_changed_cached_binding(tmp_path, change):
+    from image_agent.long_image_contracts import long_result_to_bundle
+
+    store, _, plan = initialized(tmp_path)
+    result, _ = delivery(store, plan)
+    asset = result.image_assets[0]
+    store._hydrate_asset(asset)
+    assert long_result_to_bundle(result).dto.image_assets[0].candidates[0].blob_id
+    asset.candidates[0][{"path": "file_path", "hash": "sha256", "id": "candidate_id"}[change]] = {
+        "path": "../outside.png",
+        "hash": "0" * 64,
+        "id": "other",
+    }[change]
+    candidate = long_result_to_bundle(result).dto.image_assets[0].candidates[0]
+    assert candidate.blob_id is None
 
 
 def test_delivery_intent_makes_old_page_stale(tmp_path):
@@ -370,20 +426,24 @@ def test_mixed_sections_keep_own_status_through_same_pixel_revision(
     store, request, plan = initialized(tmp_path)
     result, rendered = delivery(store, plan)
     result.plan.sections.insert(
-        1, result.plan.sections[1].model_copy(update={"section_id": "middle", "slot_ids": ["other"]})
+        1,
+        result.plan.sections[1].model_copy(update={"section_id": "middle", "slot_ids": ["other"]}),
     )
     result.plan.image_slots.append(
-        result.plan.image_slots[0].model_copy(update={"slot_id": "other", "section_ids": ["middle"]})
+        result.plan.image_slots[0].model_copy(
+            update={"slot_id": "other", "section_ids": ["middle"]}
+        )
     )
     result.image_assets.append(
         result.image_assets[0].model_copy(deep=True, update={"slot_id": "other", "status": initial})
     )
     rendered.sections.insert(
-        1, rendered.sections[0].model_copy(update={"artifact_id": "middle", "dependencies": ["other"]})
+        1,
+        rendered.sections[0].model_copy(
+            update={"artifact_id": "middle", "dependencies": ["other"]}
+        ),
     )
-    result.sections.insert(
-        1, rendered.sections[1].model_copy(update={"status": initial})
-    )
+    result.sections.insert(1, rendered.sections[1].model_copy(update={"status": initial}))
     rendered.page.dependencies = ["slot", "other"]
     rendered.slices[0].dependencies = ["slot", "other"]
     result.status = initial
@@ -697,7 +757,9 @@ def test_source_only_and_zero_slot_deliveries(tmp_path):
     rendered.page.dependencies = ["source"]
     rendered.slices[0].dependencies = ["source"]
     sections = [a.model_copy(update={"status": "succeeded"}) for a in rendered.sections]
-    result = LongImageResult(status="succeeded", plan=plan, image_assets=[source], sections=sections)
+    result = LongImageResult(
+        status="succeeded", plan=plan, image_assets=[source], sections=sections
+    )
     store.begin_delivery_revision(
         choices={"source": None}, statuses={"source": "available"}, options=request.options
     )
