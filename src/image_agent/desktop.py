@@ -18,8 +18,9 @@ from . import AgentConfig, accept_candidate, analyze_materials, create_images, r
 from .desktop_runtime import (
     BackgroundJob,
     build_request,
-    load_saved_result,
+    load_saved_task,
     saved_image_path,
+    saved_task_type,
     with_credentials,
 )
 from .errors import AgentError, make_error_info
@@ -46,6 +47,11 @@ STATUS_LABELS = {
 }
 STAGE_LABELS = {
     "prepare": "准备任务",
+    "plan": "规划长图",
+    "prepare_slot": "准备配图槽",
+    "finish_slot": "配图处理完成",
+    "render": "渲染长图段落",
+    "compose": "合成长图与切片",
     "prepare_asset": "准备图片",
     "generate": "生成图片",
     "save_candidate": "保存候选",
@@ -97,6 +103,8 @@ class DesktopApp:
         self.preview_photo = None
         self.disabled_widgets = []
         self.operation = ""
+        self.mode = "product"
+        self.product_run_dir = None
         self.started = 0
         self.status = tk.StringVar(value="就绪 · 添加素材，填写商品信息，然后分析或生成。")
         self.config_path = tk.StringVar(value=str(self.project_dir / "examples/config.openai.json"))
@@ -117,6 +125,10 @@ class DesktopApp:
         self.outputs["pdd_white_background"].trace_add("write", self._white_background_changed)
         self.platforms["pinduoduo"].trace_add("write", self._pinduoduo_changed)
         self._build()
+        from .desktop_long_image import LongImagePanel
+
+        self.product_tabs = [self.notebook.tabs()[i] for i in (0, 1, 3)]
+        self.long_panel = LongImagePanel(self)
         for key in ("product_name", "category"):
             self.fields[key].trace_add("write", self.invalidate_analysis)
         self.brief.bind("<<Modified>>", self._brief_changed)
@@ -147,6 +159,15 @@ class DesktopApp:
         )
         self.header_subtitle.pack(anchor="w", pady=(4, 0))
         ttk.Label(header, text="电商视觉工作台", style="Badge.TLabel").pack(side="right")
+        self.mode_choice = ttk.Combobox(
+            header, state="readonly", values=("商品图片", "图文长图"), width=11
+        )
+        self.mode_choice.current(0)
+        self.mode_choice.pack(side="right", padx=16)
+        self.mode_choice.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self.set_mode("long_image" if self.mode_choice.current() == 1 else "product"),
+        )
         ttk.Separator(root).grid(row=0, column=0, sticky="ews")
         panes = ttk.Panedwindow(root, orient="horizontal", style="Workspace.TPanedwindow")
         self.workspace_panes = panes
@@ -168,6 +189,7 @@ class DesktopApp:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.form = ttk.Frame(self.canvas, padding=(0, 0, 8, 12), style="Workspace.TFrame")
         window = self.canvas.create_window((0, 0), window=self.form, anchor="nw")
+        self.form_window = window
         self.form.bind(
             "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
@@ -680,11 +702,54 @@ class DesktopApp:
     def _wheel(self, event):
         widget = event.widget
         while widget is not None:
-            if widget == self.form:
+            if widget == self.form or (
+                hasattr(self, "long_panel") and widget == self.long_panel.form
+            ):
                 if not isinstance(event.widget, (tk.Text, tk.Listbox)):
                     self.canvas.yview_scroll(-int(event.delta / 120), "units")
                 break
             widget = getattr(widget, "master", None)
+
+    def set_mode(self, mode):
+        if self.busy or self.job.running or mode == self.mode:
+            return
+        if mode not in ("product", "long_image"):
+            raise ValueError("未知任务模式。")
+        if self.mode == "product":
+            self.product_run_dir = self.run_dir
+        self.mode = mode
+        panel = self.long_panel
+        self.run_dir = panel.run_dir if mode == "long_image" else self.product_run_dir
+        if self.run_dir:
+            self.output_folder = self.run_dir
+        panel.invalidate()
+        self.analysis = self.analysis_signature = None
+        self.needs_input = False
+        self.selection_options = []
+        self.choice.configure(values=("自动选择",))
+        self.choice.current(0)
+        self._text(self.analysis_text, "模式已切换，请重新分析商品素材。")
+        self.show_creative_plan(None)
+        self.mode_choice.current(1 if mode == "long_image" else 0)
+        self.canvas.itemconfigure(
+            self.form_window, window=panel.form if mode == "long_image" else self.form
+        )
+        for tab in self.product_tabs:
+            self.notebook.hide(tab) if mode == "long_image" else self.notebook.add(tab)
+        for tab in (panel.preview_tab, panel.planning_tab):
+            self.notebook.add(tab) if mode == "long_image" else self.notebook.hide(tab)
+        self.notebook.select(panel.preview_tab if mode == "long_image" else self.product_tabs[0])
+        self.analyze_button.configure(text="规划长图" if mode == "long_image" else "分析素材")
+        self.generate_button.configure(
+            text="生成长图" if mode == "long_image" else "生成图片",
+            state="disabled" if mode == "long_image" else "normal",
+        )
+        self.canvas.yview_moveto(0)
+        self.status.set(
+            "图文长图 · 填写标题与内容要求，再点击「规划长图」。"
+            if mode == "long_image"
+            else "商品图片 · 填写商品信息，分析或生成。"
+        )
 
     def choose_materials(self):
         files = filedialog.askopenfilenames(
@@ -777,6 +842,37 @@ class DesktopApp:
     def load_task(self, directory):
         if self.busy:
             return
+        self.long_panel.clear_binding()
+        self.analysis = self.analysis_signature = None
+        self.needs_input = False
+        self.selection_options = []
+        self.choice.configure(values=("自动选择",))
+        self.choice.current(0)
+        self._text(self.analysis_text, "当前任务暂无素材分析。")
+        self.show_creative_plan(None)
+        directory = Path(directory).resolve()
+        try:
+            kind = saved_task_type(directory)
+            loaded = load_saved_task(directory) if (directory / "result.json").is_file() else None
+            if kind == "long_image":
+                self.set_mode("long_image")
+                if loaded is not None:
+                    self.long_panel.load_saved(loaded)
+                else:
+                    self.long_panel.run_dir = directory
+                    self.run_dir = self.output_folder = directory
+                    self.long_panel.update_actions()
+                    self.status.set("已打开图文长图任务 · 可恢复任务或重新排版。")
+                return
+            self.set_mode("product")
+        except Exception as error:
+            self.run_dir = None
+            self.candidate_options = []
+            self.candidate_choice.configure(values=())
+            self.candidate_choice.set("")
+            self.accept_button.configure(state="disabled")
+            self.show_error(error)
+            return
         self.analysis = self.analysis_signature = None
         self.needs_input = False
         self.selection_options = []
@@ -788,7 +884,7 @@ class DesktopApp:
         self.output_folder = self.run_dir
         try:
             if (self.run_dir / "result.json").is_file():
-                self.show_result(load_saved_result(self.run_dir))
+                self.show_result(loaded)
                 self.status.set("已打开任务 · 可查看候选或点击「恢复任务」。旧版任务仅支持查看。")
             else:
                 self.assets = {}
@@ -875,6 +971,9 @@ class DesktopApp:
     def start(self, operation):
         if self.busy or self.job.running:
             return
+        if self.mode == "long_image":
+            self.long_panel.start(operation)
+            return
         try:
             config = self.session_config()
             if config is None:
@@ -882,6 +981,12 @@ class DesktopApp:
             if operation == "resume":
                 if self.run_dir is None:
                     raise ValueError("请先打开已有任务目录。")
+                meta = self.run_dir / "run.json"
+                saved = self.run_dir / "result.json"
+                if (meta.is_file() and json.loads(meta.read_text("utf-8")).get("version") != 2) or (
+                    not meta.is_file() and saved.is_file()
+                ):
+                    raise ValueError("旧版任务仅支持查看；恢复需要版本 2 任务记录。")
                 run_dir = self.run_dir
                 self._start_job(
                     operation,
@@ -944,6 +1049,7 @@ class DesktopApp:
                 "analyze": "正在分析…",
                 "resume": "正在恢复任务…",
                 "accept": "正在记录人工接受…",
+                "render": "正在本地重新排版…",
             }[operation]
         )
         self._set_busy(True)
@@ -992,6 +1098,17 @@ class DesktopApp:
                     disable(child)
 
             disable(self.form)
+            if hasattr(self, "long_panel"):
+                disable(self.long_panel.form)
+                for widget in (
+                    self.long_panel.choice,
+                    self.long_panel.candidate_choice,
+                    self.long_panel.reason_entry,
+                    self.long_panel.accept_button,
+                ):
+                    self.disabled_widgets.append((widget, widget.cget("state")))
+                    widget.configure(state="disabled")
+            self.mode_choice.configure(state="disabled")
             self.choice.configure(state="disabled")
             self.progress.start(12)
         else:
@@ -1000,6 +1117,7 @@ class DesktopApp:
             self.disabled_widgets.clear()
             self.choice.configure(state="readonly")
             self.progress.stop()
+            self.mode_choice.configure(state="readonly")
         self.analyze_button.configure(state="disabled" if value else "normal")
         self.generate_button.configure(state="disabled" if value else "normal")
         self.cancel_button.configure(state="normal" if value else "disabled")
@@ -1008,6 +1126,8 @@ class DesktopApp:
         self.accept_button.configure(
             state="normal" if not value and self.run_dir and self.candidate_options else "disabled"
         )
+        if hasattr(self, "long_panel"):
+            self.long_panel.update_actions()
 
     def cancel(self):
         if self.busy:
@@ -1028,7 +1148,12 @@ class DesktopApp:
                     break
                 self._set_busy(False)
                 if kind == "result":
-                    if self.operation == "analyze":
+                    if self.mode == "long_image":
+                        if self.operation == "analyze":
+                            self.long_panel.show_planning(value)
+                        else:
+                            self.long_panel.show_result(value)
+                    elif self.operation == "analyze":
                         self.show_analysis(value)
                         self.notebook.select(1)
                         self.status.set(f"分析完成 · {STATUS_LABELS[value.status]}")
@@ -1048,11 +1173,14 @@ class DesktopApp:
         self.poll_timer = self.root.after(80, self.poll)
 
     def show_progress(self, event):
-        if event.get("run_dir"):
+        if event.get("run_dir") and not (self.mode == "long_image" and self.operation == "analyze"):
             self.run_dir = Path(event["run_dir"]).resolve()
             self.output_folder = self.run_dir
+            if self.mode == "long_image":
+                self.long_panel.run_dir = self.run_dir
         stage = STAGE_LABELS.get(event.get("stage"), event.get("stage", "处理中"))
-        detail = f" · {event['asset_id']}" if event.get("asset_id") else ""
+        identifier = event.get("slot_id") or event.get("asset_id")
+        detail = f" · {identifier}" if identifier else ""
         attempt = f" · 第 {event['attempt']} 次" if event.get("attempt") else ""
         message = f" · {event['message']}" if event.get("message") else ""
         self.progress_message = self.safe_text(stage + detail + attempt + message)
@@ -1352,7 +1480,11 @@ class DesktopApp:
             self.show_error(error)
 
     def export_json(self):
-        widget = self.analysis_text if self.notebook.index("current") == 1 else self.json_text
+        widget = (
+            self.analysis_text
+            if self.mode == "product" and self.notebook.index("current") == 1
+            else self.json_text
+        )
         content = widget.get("1.0", "end-1c")
         try:
             json.loads(content)

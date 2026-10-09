@@ -43,6 +43,51 @@ def load_saved_result(run_dir: Path) -> CreationResult:
     return CreationResult.model_validate(payload)
 
 
+def saved_task_type(run_dir: Path) -> str:
+    """Dispatch only explicit types; historical absent types mean product."""
+    root = Path(run_dir).resolve()
+    metadata = root / "run.json"
+    if metadata.is_file():
+        meta = json.loads(metadata.read_text("utf-8"))
+        kind = meta.get("task_type", "product")
+        version = meta.get("version")
+        if kind not in ("product", "long_image") or version not in (1, 2):
+            raise ValueError("不支持的任务类型或版本。")
+        if kind == "long_image" and version != 2:
+            raise ValueError("图文长图仅支持任务版本 2。")
+    else:
+        kind = "product"
+    result_path = root / "result.json"
+    if result_path.is_file():
+        payload = json.loads(result_path.read_text("utf-8"))
+        result_kind = payload.get("task_type", "product")
+        if result_kind not in ("product", "long_image"):
+            raise ValueError("不支持的结果类型。")
+        if metadata.is_file() and result_kind != kind:
+            raise ValueError("任务与结果类型不一致。")
+        kind = result_kind
+        allowed = ("1.0",) if kind == "long_image" else ("1.0", "2.0")
+        if payload.get("schema_version", "1.0") not in allowed:
+            raise ValueError("不支持的结果版本。")
+        if kind == "long_image" and not metadata.is_file():
+            raise ValueError("图文长图缺少可验证的任务记录。")
+    elif not metadata.is_file():
+        raise ValueError("目录中没有任务记录或结果。")
+    return kind
+
+
+def load_saved_task(run_dir: Path):
+    """Load historical product results or verified long-image results."""
+    if saved_task_type(run_dir) == "product":
+        return load_saved_result(Path(run_dir))
+    from .long_image_store import LongImageRunStore
+
+    store = LongImageRunStore(Path(run_dir))
+    with store.lock():
+        store.load_metadata()
+        return store.hydrate_result()
+
+
 def build_request(paths: Sequence[Path], **fields) -> CreationRequest:
     return CreationRequest(
         materials=[
