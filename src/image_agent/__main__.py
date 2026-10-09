@@ -71,6 +71,9 @@ def parser():
     accept.add_argument("--asset", required=True)
     accept.add_argument("--candidate", required=True)
     accept.add_argument("--reason", required=True)
+    from .long_image_cli import add_long_image_parser
+
+    add_long_image_parser(subs)
     return root
 
 
@@ -164,6 +167,10 @@ def request_from_args(args):
 def run_cli(argv=None):
     try:
         args = parser().parse_args(argv)
+        if args.command == "long-image":
+            from .long_image_cli import run_long_image_cli
+
+            return run_long_image_cli(args)
         if args.command == "accept":
             reason = args.reason.strip()
             if not reason:

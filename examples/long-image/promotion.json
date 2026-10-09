@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "task_type": "long_image",
+  "scene": "promotion",
+  "title": "周末手作体验",
+  "content_brief": "介绍手作体验活动。时间为2026年10月17日14:00–16:00，地点为社区活动室，参与方式为现场报名。组织活动亮点、时间地点和参与方式，不添加优惠、联系方式或品牌标识。",
+  "required_copy": [{"requirement_id": "event-time", "text": "2026年10月17日14:00–16:00"}],
+  "materials": [],
+  "options": {"width": 750, "theme": "warm", "slice_height": 1500}
+}

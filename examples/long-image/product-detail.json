@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "task_type": "long_image",
+  "scene": "product_detail",
+  "title": "我的杯子：外观与使用介绍",
+  "content_brief": "根据上传的真实杯子素材介绍外观、可见细节及使用场景；不推断容量、材质、认证或售后承诺。",
+  "product_context": {"product_name": "我的杯子", "category": "杯具"},
+  "materials": [{"material_id": "cup", "media_id": "cup-photo"}],
+  "options": {"width": 750, "theme": "clean", "slice_height": 1500}
+}

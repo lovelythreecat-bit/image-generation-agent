@@ -4,7 +4,7 @@
   <img src="./assets/readme/hero.svg" width="100%" alt="image-agent：从真实商品素材开始电商图片创作，提供 Windows 工作台、CLI 与 Python API">
 </p>
 
-独立的商品图片创作 Python 包。添加多张素材，选择商品主体与要素，生成主图、详情图或拼多多白底图，再查看审核结果与候选历史。
+独立的图片创作 Python 包。支持真实商品素材生成主图、三张详情图或白底图，也支持六种场景的图文长图：规划内容、生成配图、程序排版，导出整图、语义分段及切片。
 
 <p align="center">
   <a href="./assets/readme/desktop-workbench.png"><img src="./assets/readme/desktop-workbench.png" width="100%" alt="桌面工具打开本地历史任务的实际截图：左侧配置商品与创作参数，右侧查看商品图片及审核结果"></a>
@@ -15,6 +15,93 @@
 **Python ≥3.12 · Windows 桌面测试工具 · 本地 SQLite 检查点 · MIT**
 
 [快速上手](#快速上手) · [命令行](#命令行) · [Python 接入](#python-接入) · [技术参考](#技术参考) · [开发与验收](#开发与验收)
+
+## 图文长图
+
+长图覆盖 `product_detail`（商品详情）、`brand_intro`（品牌介绍）、`promotion`（活动宣传）、`tutorial`（使用教程）、`comparison`（功能/参数对比）和 `custom`（自定义介绍）。商品详情需要真实素材及商品信息，平台可不填；其余场景可以只提供标题和介绍。需要准确复现标识、人物或界面时，应提供对应素材。
+
+页内标题、正文、步骤、表格和指定原文由程序绘制，AI 负责规划内容与常规比例配图。商品原生标签、图案仍属于配图证据。数字、日期及指定原文按 Unicode 码点保留；不会通过缩小字体或裁掉正文来容纳超长内容。默认宽 750、切片高 1500，可分别设置为 400–2400、500–4000；画布高上限 16000 像素。
+
+输出包含一张整图、按内容区块划分的语义段图，以及按连续像素范围分割的 PNG 切片。按顺序拼接切片可逐像素复原整图，语义分段与等高切片分别保存。source 槽原样排版素材，文字区块可没有图槽；纯文字或纯素材页面无需生图和模型审核。
+
+桌面工具切换到「图文长图」模式，选择场景，填写标题、介绍及可选素材，再点击「规划长图」或「生成长图」。规划结果展示区块、配图槽及需补充的问题；商品选择应保留同一分析快照。历史任务可在「整张长图 / 语义段落 / 切片 / 原始配图」间切换查看，使用「重新排版已保存长图」调整本地选项；填写「接受原因」后可「接受所选候选」。下方 CLI 和 Python API 使用同一套长图管线，原有商品主图、`detail_page` 三张详情图及白底图 API 保持可用。
+
+### 长图 CLI
+
+所有请求 JSON 使用独立的 `schema_version=1.0`、`task_type=long_image` DTO，不包含本地输出目录、字体路径、文件路径、密钥或台账描述。示例见 [tutorial.json](examples/long-image/tutorial.json)、[promotion.json](examples/long-image/promotion.json)、[product-detail.json](examples/long-image/product-detail.json)。以下命令在仓库根目录执行；模型规划/生成需使用你自己的可用配置与凭据。
+
+```powershell
+# 无素材教程：直接规划、配图并排版，规划调用计入本次生成任务
+python -m image_agent long-image create --request-json examples/long-image/tutorial.json --config examples/config.openai.json --out output/tutorial
+
+# 独立规划有自己的固定预算与 planning_id
+python -m image_agent long-image analyze --request-json examples/long-image/promotion.json --config examples/config.openai.json --max-vision-calls 6 --out output/promotion-plan
+
+# 使用 analyze 打印的实际 plan_record 路径复用可信规划
+python -m image_agent long-image create --request-json examples/long-image/promotion.json --plan output/promotion-plan/plan.json --plan-record "<planning-run>/records/<record-id>.json" --config examples/config.openai.json --out output/promotion
+
+# run_dir 使用 create 实际打印的本次任务目录
+python -m image_agent long-image resume "<run_dir>" --config examples/config.openai.json
+python -m image_agent long-image render "<run_dir>" --width 750 --theme warm --slice-height 1200
+python -m image_agent long-image accept "<run_dir>" --slot "<slot_id>" --candidate "<candidate_id>" --reason "已人工核对并接受"
+```
+
+`analyze` 在指定输出根目录写入路径隔离的 `planning.json`、`plan.json`，商品分析另保存 `analysis.json`；真实规划执行记录位于新建的规划任务目录。`--plan-record` 必须选择原任务的 `records/<record-id>.json`，适配器会通过原 store 校验请求、实际素材、计划、选择、分析内容及用量记录。仅复制 JSON 描述、声明 usage 或 trusted 标志不能获得可信绑定。商品复用含分析的规划记录时，必须增加 `--analysis output/product-plan/analysis.json`；显式商品选择也必须提交产生这些 ID 的同一快照。内容、素材或选择不匹配时应重新规划；仅改变本地宽度、主题、切片高度或字体可以复用。
+
+素材通过 `media_id` 绑定真实本地文件。例如商品示例使用 `cup-photo`，在自己创建的 `media.json` 中填写 `{"cup-photo": "cup.png"}`，并把实际杯子照片放入自己的媒体目录：
+
+```powershell
+python -m image_agent long-image create --request-json examples/long-image/product-detail.json --media-map media.json --media-root ./my-media --config examples/config.openai.json --out output/product-long
+```
+
+媒体映射只能使用媒体根目录内的相对路径，拒绝绝对路径、URL、父目录跳转及解析后越界。没有素材的请求不需要媒体映射。JSON 中的 `options.font_id` 可用 `--font-path` 绑定本地字体；也可直接用该参数覆盖默认字体。
+
+中文使用本机已安装字体。可通过 `--font-path` 指定 TTF/OTF/TTC；未指定时按固定顺序查找系统中文字体（Windows 常用微软雅黑、黑体、宋体），逐字符按 cmap 覆盖回退。缺字返回 `font_missing_glyph`，输入文字在付费调用前预检，规划新增文字也会检查；不会联网下载字体或输出方框字。
+
+`render` 与 `accept` 无需配置文件、凭据或网络。重排版只接受 `width/theme/slice_height/font_path`，覆盖会持久保存，后续重排版、接受或恢复沿用。改变标题、文案、素材及 `style_hint` 应重新规划。生成请求已提交但没有持久响应时标记 `generation_uncertain`，恢复不会自动再次生图；已保存的候选保留，审核错误可在恢复时重新审核。人工接受必须给出非空原因并记录时间，保留真实审核结果。
+
+CLI 输出规划区块与预计生成槽数、问题、候选选择/接受状态，以及整图/段图/切片路径。`execution` 表示当前任务真实调用；`linked_planning` 按唯一 `planning_id` 引用独立规划用量；`display_total` 为展示合计，恢复或重复导出不会重复累加，未知用量显示 `unavailable`。独立规划和生成各自受固定单任务预算约束，内联规划计入生成任务；需要跨任务硬上限时，Python `ExecutionPolicy.shared_ledger_path` 可使用共享台账。最终一张长图可能包含多次配图、规划、审核和修复调用。
+
+| 结果状态 | 退出码 |
+| --- | ---: |
+| succeeded（包括文字或原素材页面） | 0 |
+| failed / quality_failed / 布局或保存失败 | 1 |
+| needs_input | 3 |
+| accepted（至少一个槽人工接受，其余通过） | 4 |
+| pending_audit / audit_error | 5 |
+| budget_exhausted | 6 |
+| generation_uncertain | 7 |
+
+未知任务类型、请求 Schema 或任务版本会明确报错。旧商品 v1/v2 结果仍可在桌面查看，旧 v1 任务不支持继续恢复。旧 CLI `create --output detail_page` 行为不变。
+
+### 长图 Python API
+
+```python
+from image_agent import (
+    LongImageRequest, analyze_long_image, create_long_image,
+    resume_long_image, render_long_image, accept_long_image_candidate,
+)
+
+request = LongImageRequest(
+    scene="tutorial", title="整理桌面的四个步骤",
+    content_brief="清空桌面、分类物品、放回常用品、每晚收纳。",
+    output_dir="output/tutorial-plan",
+)
+planning = await analyze_long_image(request, config)
+if planning.status == "ready":
+    request.output_dir = "output/tutorial"
+    result = await create_long_image(
+        request, config, plan=planning.plan, analysis=planning.analysis,
+        planning_record=planning.record,
+    )
+    rerendered = await render_long_image(result.run_dir, render_options={"theme": "warm"})
+    # 需要生成或重审的任务：await resume_long_image(result.run_dir, config)
+    # 人工接受：await accept_long_image_candidate(run_dir, slot_id, candidate_id, reason="已核对")
+```
+
+不提供 `output_dir` 可获得内存交付；持久恢复与接受需要任务目录。`render_long_image_memory(plan, selected_assets, render_options=...)` 为纯本地内存渲染入口，输入已验证计划和带状态的槽资产。原有 `CreationRequest/create_images/analyze_materials/resume_images/accept_candidate` 继续可用。
+
+开发中的离线示例和测试用于验证规划契约、真实调用计数、状态、恢复、中文布局及无损切片，不证明真实模型的画面质量、账号权限或服务能力。真实 API 测试保持显式启用。
 
 ## 从素材到交付
 
