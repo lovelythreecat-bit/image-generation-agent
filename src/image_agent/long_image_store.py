@@ -158,6 +158,8 @@ class LongImageRunStore(RunStore):
 
     def load_metadata(self, config=None):
         meta = self.json("run.json")
+        if not isinstance(meta, dict):
+            raise OutputError("run metadata must be a JSON object")
         if meta.get("version") != 2 or meta.get("task_type") != "long_image":
             raise AgentError("only version 2 long_image runs are supported")
         if config is not None and config_fingerprint(config) != meta["config_fingerprint"]:

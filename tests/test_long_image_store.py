@@ -37,6 +37,79 @@ def initialized(tmp_path=None):
     return store, request, plan
 
 
+@pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize("metadata", ["null", "[]", '"invalid"', "42", "true"])
+def test_non_object_run_metadata_is_a_controlled_output_error(tmp_path, persisted, metadata):
+    store = store_type()(tmp_path if persisted else None)
+    store.write("run.json", metadata.encode("utf-8"))
+
+    with pytest.raises(OutputError, match="metadata.*JSON object") as caught:
+        store.load_metadata()
+
+    assert caught.value.code == "output"
+    assert caught.value.kind == "output"
+
+
+@pytest.mark.parametrize("metadata", ["null", "[]", '"invalid"', "42", "true"])
+@pytest.mark.parametrize(
+    "entry", ["render_long_image", "resume_long_image", "accept_long_image_candidate"]
+)
+@pytest.mark.asyncio
+async def test_public_local_paths_reject_non_object_metadata_without_clients(
+    tmp_path, monkeypatch, metadata, entry
+):
+    import image_agent
+    import image_agent.long_image_runtime as runtime
+
+    def denied(*args, **kwargs):
+        raise AssertionError("invalid metadata must not read configuration or create clients")
+
+    monkeypatch.setattr(AgentConfig, "from_env", denied)
+    monkeypatch.setattr(runtime, "HttpTransport", denied)
+    monkeypatch.setattr(runtime, "_lazy_dependencies", denied)
+    (tmp_path / "run.json").write_text(metadata, encoding="utf-8")
+    operation = getattr(image_agent, entry)
+
+    if entry == "accept_long_image_candidate":
+        with pytest.raises(OutputError, match="metadata.*JSON object") as caught:
+            await operation(tmp_path, "slot", "candidate", reason="已确认")
+        assert caught.value.code == "output"
+        assert caught.value.kind == "output"
+    else:
+        result = await operation(tmp_path)
+        assert result.status == "failed"
+        assert result.error_info.code == "output"
+        assert result.error_info.kind == "output"
+        assert "metadata" in result.error_info.message
+        assert "JSON object" in result.error_info.message
+        assert result.output_errors == [result.error_info]
+        assert result.page is None
+        assert result.image_assets == []
+
+    assert (tmp_path / "run.json").read_text(encoding="utf-8") == metadata
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "budget.sqlite").exists()
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"version": 1, "task_type": "long_image"},
+        {"version": 3, "task_type": "long_image"},
+        {"version": 2, "task_type": "unknown"},
+        {"version": 2},
+    ],
+)
+def test_unsupported_object_run_metadata_remains_a_clear_validation_error(tmp_path, metadata):
+    store = store_type()(tmp_path)
+    store.json("run.json", metadata)
+
+    with pytest.raises(AgentError, match="only version 2 long_image runs") as caught:
+        store.load_metadata()
+
+    assert caught.value.code == "validation"
+
+
 def planning_record(store, request, plan):
     ledger = store.open_ledger()
     ledger.reserve("vision", "planning/test")
