@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python ≥3.12、Pydantic 2、Pillow 12、LangGraph、SQLite、httpx、Tkinter、pytest、Ruff；新增 `fonttools>=4.60,<5` 用于 cmap 检查，禁止依赖网络下载字体。
 
-**Spec:** [通用图文长图设计](../specs/2026-10-09-general-long-image-design.md)。用户已认可评审结果及多 agent 执行方式；本文件是待审阅的实施计划。
+**Spec:** [通用图文长图设计](../specs/2026-10-09-general-long-image-design.md)。用户已认可评审结果及多 agent 执行方式，并授权主调度自行核对计划后持续实施。
 
 ## Global Constraints
 
@@ -59,11 +59,11 @@
 - `collect_text_requirements(request: LongImageRequest) -> list[LongImageRequirement]`；`validate_long_image_plan(request, plan, *, material_hashes: dict[str,str], analysis=None) -> None`；`planning_fingerprint(request, material_hashes) -> str`，失败抛 AgentError(code=plan_invalid)。
 - 四个 DTO 同名加 DTO 后缀；`long_request_from_dto(dto, sources, *, font_bindings=None) -> LongImageRequest`；`long_result_to_bundle(result) -> LongImageResultBundle`（dto/blobs）；`long_planning_to_dto(result) -> LongImagePlanningResultDTO`。
 
-- [ ] Step 1：写失败用例 `test_nonproduct_needs_no_platform_or_materials`，断言 tutorial 请求合法、product_detail 无素材拒绝；`test_slot_references_and_six_slot_limit` 拒绝悬空/重复/未引用/第七生成槽。
-- [ ] Step 2：运行 `.venv\Scripts\python.exe -m pytest tests/test_long_image_models.py tests/test_long_image_requirements.py tests/test_long_image_contracts.py -q`，确认失败来自新功能未实现。
-- [ ] Step 3：实现上述类型、JSON Pointer/码点原文来源、必需文案次数/顺序与反向槽引用校验；明确引号原文先由本地提取，模型不得删除。表格单元格同样为带来源的文本单元。
-- [ ] Step 4：增加 `test_same_text_distinct_ids`（相同文字两个要求不能靠子串计数通过）、`test_missing_copy_fails_before_generation`、`test_bundle_contains_no_local_paths`（嵌套错误与记录也不泄漏）、`test_stale_page_is_not_current_blob`；跑上述测试及旧 `test_contracts.py`。
-- [ ] Step 5：运行 Schema 导出并逐项验证旧四个导出与历史 result-v1 保持原有契约，新四个可由 JSON Schema 载入；提交本任务范围。
+- [x] Step 1：写失败用例 `test_nonproduct_needs_no_platform_or_materials`，断言 tutorial 请求合法、product_detail 无素材拒绝；`test_slot_references_and_six_slot_limit` 拒绝悬空/重复/未引用/第七生成槽。
+- [x] Step 2：运行 `.venv\Scripts\python.exe -m pytest tests/test_long_image_models.py tests/test_long_image_requirements.py tests/test_long_image_contracts.py -q`，确认失败来自新功能未实现。
+- [x] Step 3：实现上述类型、JSON Pointer/码点原文来源、必需文案次数/顺序与反向槽引用校验；明确引号原文先由本地提取，模型不得删除。表格单元格同样为带来源的文本单元。
+- [x] Step 4：增加 `test_same_text_distinct_ids`（相同文字两个要求不能靠子串计数通过）、`test_missing_copy_fails_before_generation`、`test_bundle_contains_no_local_paths`（嵌套错误与记录也不泄漏）、`test_stale_page_is_not_current_blob`；跑上述测试及旧 `test_contracts.py`。
+- [x] Step 5：运行 Schema 导出并逐项验证旧四个导出与历史 result-v1 保持原有契约，新四个可由 JSON Schema 载入；提交本任务范围（924e961；root 复测 41 passed，快照与证据见实施账本）。
 
 ### Task 2: 字体、纯本地布局与像素一致切片
 
@@ -71,11 +71,11 @@
 
 **Interfaces:** 消费任务 1 类型；产生 `resolve_fonts(texts: list[str], font_path: Path|None) -> FontSet`（实际字体哈希、cmap、回退顺序）；`preflight_long_image(request) -> None`；`render_long_layout(plan: LongImagePlan, selected_assets: dict[str,LongSlotAsset], options: LongImageOptions) -> RenderedLongImage`、`render_fingerprint(plan, assets, options, fonts) -> str`。全部同步本地函数，由异步入口使用现有 compute 包装；不访问 API 或写任务目录。公开内存结果入口由任务 5 包装，最终状态不在渲染器内聚合。
 
-- [ ] Step 1：写 `test_slices_reconstruct_page_pixels`：解码 PNG 切片后纵向拼接，断言与整图像素相等；`test_table_and_step_text_not_clipped`：核对每个文本 ID 已绘制、区域不重叠。
-- [ ] Step 2：运行新渲染/字体测试确认失败；使用已安装真实字体测试中文，缺中文环境用明确 skip 原因，最终 Windows 验收必须实际执行中文用例。
-- [ ] Step 3：实现六种通用版式、两列表格与多列对比表、文字实际测量、码点换行与按字符字体回退。FontTools 读取 TTF/OTF/TTC cmap；优先用户字体，Windows 微软雅黑/黑体/宋体，POSIX 常见 Noto/DejaVu，缺字返回 font_missing_glyph；不下载字体。
-- [ ] Step 4：增加 `test_missing_glyph_before_paid_call`、`test_font_file_replacement_changes_fingerprint`、`test_height_limit_does_not_truncate`、`test_zero_generated_slots_render_successfully`、`test_multilingual_and_newlines_preserve_source`，验证尺寸/字号/完整配图、主题对比度及超限错误；运行新测试和 `test_images.py`。
-- [ ] Step 5：添加最大宽高输入的内存检查，逐段释放中间图，禁止同时构造多份整图；依赖安装仅更新声明及锁文件，不修改系统字体。提交本任务范围。
+- [x] Step 1：写 `test_slices_reconstruct_page_pixels`：解码 PNG 切片后纵向拼接，断言与整图像素相等；`test_table_and_step_text_not_clipped`：核对每个文本 ID 已绘制、区域不重叠。
+- [x] Step 2：运行新渲染/字体测试确认失败；使用已安装真实字体测试中文，缺中文环境用明确 skip 原因，最终 Windows 验收必须实际执行中文用例。
+- [x] Step 3：实现六种通用版式、两列表格与多列对比表、文字实际测量、码点换行与按字符字体回退。FontTools 读取 TTF/OTF/TTC cmap；优先用户字体，Windows 微软雅黑/黑体/宋体，POSIX 常见 Noto/DejaVu，缺字返回 font_missing_glyph；不下载字体。
+- [x] Step 4：增加 `test_missing_glyph_before_paid_call`、`test_font_file_replacement_changes_fingerprint`、`test_height_limit_does_not_truncate`、`test_zero_generated_slots_render_successfully`、`test_multilingual_and_newlines_preserve_source`，验证尺寸/字号/完整配图、主题对比度及超限错误；运行新测试和 `test_images.py`。
+- [x] Step 5：添加最大宽高输入的内存检查，逐段释放中间图，禁止同时构造多份整图；依赖安装仅更新声明及锁文件，不修改系统字体。提交本任务范围。
 
 ### Task 3: 长图任务存储、可信规划绑定与原子衍生修订
 
@@ -85,11 +85,11 @@
 - 长图 run.json：version=2、task_type=long_image、独立请求、inputs（可空）、policy、config_fingerprint、规划记录。旧无类型 v2 仍为商品任务，不给 v1 新续跑能力。
 - `begin_delivery_revision(*, choices, statuses, options) -> int`、`commit_delivery_revision(result, rendered=None) -> None`、`pending_delivery_revision() -> dict|None` 固定 intent→stale→新 revision 文件→原子 current 指针→检查点提交顺序。
 
-- [ ] Step 1：写 `test_empty_materials_persist_without_legacy_source_access`、`test_external_record_id_cannot_forge_verified_plan`、`test_relative_paths_and_hashes_are_checked`；运行新测试确认失败。
-- [ ] Step 2：实现类型化长图存储、已验证规划哈希绑定和空输入；台账使用现有 BudgetLedger，不复制计数实现。
-- [ ] Step 3：写 `test_delivery_intent_makes_old_page_stale`、`test_recover_each_revision_commit_boundary`、`test_corrupt_selected_candidate_is_not_current`，分别在 intent、槽元数据、段图、指针切换、清理处注入中断并核对一致性。
-- [ ] Step 4：实现衍生版本保存与加载；同字节改变状态可复用像素，但元数据和 current 指针必须更新。跑新测试及 `test_process_recovery.py/test_graph_recovery.py/test_output.py`。
-- [ ] Step 5：核对所有路径在任务根目录内、写入原子、锁和台账不被重置；提交本任务范围。
+- [x] Step 1：写 `test_empty_materials_persist_without_legacy_source_access`、`test_external_record_id_cannot_forge_verified_plan`、`test_relative_paths_and_hashes_are_checked`；运行新测试确认失败。
+- [x] Step 2：实现类型化长图存储、已验证规划哈希绑定和空输入；台账使用现有 BudgetLedger，不复制计数实现。
+- [x] Step 3：写 `test_delivery_intent_makes_old_page_stale`、`test_recover_each_revision_commit_boundary`、`test_corrupt_selected_candidate_is_not_current`，分别在 intent、槽元数据、段图、指针切换、清理处注入中断并核对一致性。
+- [x] Step 4：实现衍生版本保存与加载；同字节改变状态可复用像素，但元数据和 current 指针必须更新。跑新测试及 `test_process_recovery.py/test_graph_recovery.py/test_output.py`。
+- [x] Step 5：核对所有路径在任务根目录内、写入原子、锁和台账不被重置；提交本任务范围。
 
 ### Task 4: 规划、澄清、商品适配与槽审核
 
@@ -100,11 +100,11 @@
 - 公开 async `analyze_long_image(request, config=None, *, analysis=None, policy=None, on_progress=None) -> LongImagePlanningResult`；内部 `prepare_long_plan(request, config, dependencies, store, ledger, *, plan=None, analysis=None, planning_record=None) -> LongImagePlanningResult` 供任务 5 在其台账内调用。
 - PreparedLongProduct/PreparedLongSlot 为本模块类型；前者含真实分析/选择/证据快照，后者含 references、prompt、target、element_plan（商品时）及通用槽要求。
 
-- [ ] Step 1：写六场景参数化离线规划用例、`test_required_date_missing_yields_field_issue`、`test_two_products_selection_uses_same_snapshot`；使用真实材料 hash 的 FakeVision/FakeGenerator，无网络。运行确认失败。
-- [ ] Step 2：实现独立规划任务与 Ledger、planning_id/记录；追加 `plan_long_image/audit_long_image_asset` 路由，默认已有 vision。统一 `_call` 的 JSON 纠正和验证，在所属 vision scope 内执行发现、验证、规划、审核。
-- [ ] Step 3：实现缺输入 issues/来源校验、同快照选择、ready 记录绑定；商品编译只包含槽视觉要求，平台为空使用通用详情规则；tutorial/brand 等不填商品审核字段。
-- [ ] Step 4：增加 `test_corrective_post_is_counted`、`test_shared_budget_limits_repeated_planning`、`test_exact_copy_does_not_enter_slot_must_show`、`test_native_label_still_audited`、`test_unknown_or_missing_audit_checks_raise_audit_error`、`test_forged_or_stale_plan_rejected`；跑新测试及旧 `test_marketing_claims.py/test_creative_planning.py/test_selection.py/test_config.py/test_platforms.py`。
-- [ ] Step 5：核对源码引用不是外部计划自报可信，source/none 不付费生成或审核，缺具体事实不虚构；提交本任务范围。
+- [x] Step 1：写六场景参数化离线规划用例、`test_required_date_missing_yields_field_issue`、`test_two_products_selection_uses_same_snapshot`；使用真实材料 hash 的 FakeVision/FakeGenerator，无网络。运行确认失败。
+- [x] Step 2：实现独立规划任务与 Ledger、planning_id/记录；追加 `plan_long_image/audit_long_image_asset` 路由，默认已有 vision。统一 `_call` 的 JSON 纠正和验证，在所属 vision scope 内执行发现、验证、规划、审核。
+- [x] Step 3：实现缺输入 issues/来源校验、同快照选择、ready 记录绑定；商品编译只包含槽视觉要求，平台为空使用通用详情规则；tutorial/brand 等不填商品审核字段。
+- [x] Step 4：增加 `test_corrective_post_is_counted`、`test_shared_budget_limits_repeated_planning`、`test_exact_copy_does_not_enter_slot_must_show`、`test_native_label_still_audited`、`test_unknown_or_missing_audit_checks_raise_audit_error`、`test_forged_or_stale_plan_rejected`；跑新测试及旧 `test_marketing_claims.py/test_creative_planning.py/test_selection.py/test_config.py/test_platforms.py`。
+- [x] Step 5：核对源码引用不是外部计划自报可信，source/none 不付费生成或审核，缺具体事实不虚构；提交本任务范围。
 
 ### Task 5: 可恢复生成、状态聚合、接受与本地重排版
 
@@ -114,11 +114,11 @@
 - `aggregate_long_image(plan, assets, *, checks, output_errors) -> AssetStatus` 使用 spec 聚合表；`LongImageNodes` 节点：prepare/plan/prepare_slot/generate/save_candidate/audit/repair/finish_slot/render/compose/finish。LongGraphState 包含 phase、slot_index、result、runtime、planning_record、delivery intent。
 - 进度事件沿用 stage/message/run_dir，加 slot_id、section_id、attempt；取消沿用当前线程 settle 及任务 cleanup 规则。
 
-- [ ] Step 1：写 `test_zero_slots_and_source_only_success`、`test_inline_and_saved_plan_generation_counts`、`test_product_and_generic_audits_are_separate`；运行确认失败。
-- [ ] Step 2：实现单套真正 LangGraph 编排；每槽串行，适用首图作为风格参考，商品证据优先。调用发生在稳定 operation_id 的 image scope 内，raw/saved 先于候选/检查点；不在节点里复制 HTTP 协议层。
-- [ ] Step 3：写恢复注入测试 `test_submitted_without_raw_never_regenerates`、`test_saved_raw_recovers_without_post`、`test_same_bytes_audit_and_accept_update_all_outputs`、`test_accept_then_layout_failure_is_failed`、`test_local_render_resume_requires_no_credentials`；使用 FakeTransport 统计实际 POST，不只统计 wrapper 调用。
-- [ ] Step 4：实现状态表、usage execution/linked_planning/display_total 去重、接受记录及原子修订；render 白名单只有 width/theme/slice_height/font_path，拒绝内容覆盖；audit_error 恢复只重审。补 `test_cancel_preserves_saved_candidates`、`test_usage_not_duplicated_on_resume_or_export`、`test_save_failure_blocks_page_success`。
-- [ ] Step 5：运行本任务 tests 及旧 `test_entrypoint_recovery.py/test_process_recovery.py/test_public_api.py/test_pipeline.py`；检查旧符号与 task type 报错；提交本任务范围。
+- [x] Step 1：写 `test_zero_slots_and_source_only_success`、`test_inline_and_saved_plan_generation_counts`、`test_product_and_generic_audits_are_separate`；运行确认失败。
+- [x] Step 2：实现单套真正 LangGraph 编排；每槽串行，适用首图作为风格参考，商品证据优先。调用发生在稳定 operation_id 的 image scope 内，raw/saved 先于候选/检查点；不在节点里复制 HTTP 协议层。
+- [x] Step 3：写恢复注入测试 `test_submitted_without_raw_never_regenerates`、`test_saved_raw_recovers_without_post`、`test_same_bytes_audit_and_accept_update_all_outputs`、`test_accept_then_layout_failure_is_failed`、`test_local_render_resume_requires_no_credentials`；使用 FakeTransport 统计实际 POST，不只统计 wrapper 调用。
+- [x] Step 4：实现状态表、usage execution/linked_planning/display_total 去重、接受记录及原子修订；render 白名单只有 width/theme/slice_height/font_path，拒绝内容覆盖；audit_error 恢复只重审。补 `test_cancel_preserves_saved_candidates`、`test_usage_not_duplicated_on_resume_or_export`、`test_save_failure_blocks_page_success`。
+- [x] Step 5：运行本任务 tests 及旧 `test_entrypoint_recovery.py/test_process_recovery.py/test_public_api.py/test_pipeline.py`；检查旧符号与 task type 报错；提交本任务范围。
 
 ### Task 6: CLI、JSON 媒体绑定与文档示例
 
@@ -126,11 +126,11 @@
 
 **Interfaces:** `add_long_image_parser(subparsers) -> None`；`run_long_image_cli(args) -> int`；子命令 long-image analyze/create/resume/accept/render。本地 --font-path/--out/任务目录参数不进入请求 JSON；--plan-record 绑定可信本地记录，显式商品选择可提供同一分析文件。
 
-- [ ] Step 1：写无素材 tutorial 的 JSON 创建、规划复用、无密钥 render、带 reason 接受的 CLI 测试；写未知 task_type/version/绝对媒体路径拒绝用例，确认失败。
-- [ ] Step 2：接入新子命令、request DTO 和 media_id 映射；打印各阶段用量、整图/段落/切片及状态，不打印密钥、数据前缀或长提示词。
-- [ ] Step 3：按 spec 退出码表验证全部状态，尤其 accepted=4、保存失败=1、audit_error=5、generation_uncertain=7，零生成槽成功=0；普通 CLI 及旧历史查看保持兼容。
-- [ ] Step 4：运行 `test_long_image_cli.py/test_cli.py/test_contracts.py/test_live_smoke.py`；更新 README 的 API/CLI/桌面入口、字体要求、生成调用与规划预算、旧结果查看和恢复边界。
-- [ ] Step 5：验收示例 JSON 可绑定实际测试素材执行且不硬编码商品平台；提交本任务范围。
+- [x] Step 1：写无素材 tutorial 的 JSON 创建、规划复用、无密钥 render、带 reason 接受的 CLI 测试；写未知 task_type/version/绝对媒体路径拒绝用例，确认失败。
+- [x] Step 2：接入新子命令、request DTO 和 media_id 映射；打印各阶段用量、整图/段落/切片及状态，不打印密钥、数据前缀或长提示词。
+- [x] Step 3：按 spec 退出码表验证全部状态，尤其 accepted=4、保存失败=1、audit_error=5、generation_uncertain=7，零生成槽成功=0；普通 CLI 及旧历史查看保持兼容。
+- [x] Step 4：运行 `test_long_image_cli.py/test_cli.py/test_contracts.py/test_live_smoke.py`；更新 README 的 API/CLI/桌面入口、字体要求、生成调用与规划预算、旧结果查看和恢复边界。
+- [x] Step 5：验收示例 JSON 可绑定实际测试素材执行且不硬编码商品平台；提交本任务范围。
 
 ### Task 7: 中文桌面长图模式、澄清与预览
 
@@ -138,11 +138,11 @@
 
 **Interfaces:** `LongImagePanel(app)` 维护长图输入/规划/结果，`make_request() -> LongImageRequest`、`show_planning(result) -> None`、`show_result(result) -> None`、`rebuild_saved() -> None`；`load_saved_task(run_dir) -> CreationResult|LongImageResult` 先按类型/版本分派。既有 load_saved_result 保留商品用途及签名，旧测试行为不变。
 
-- [ ] Step 1：写 `test_modes_preserve_fields_but_clear_stale_plan`、`test_nonproduct_hides_product_requirements`、`test_selection_submits_same_analysis`，确认失败。
-- [ ] Step 2：沿用现有 ttk 样式、中文字体、BackgroundJob、取消/错误处理及候选原因输入；长图模式支持六场景、主题/内容、可选素材、折叠布局参数，商品详情才显示商品及平台。
-- [ ] Step 3：规划视图显示区块、必需原文、issues、调用数量及用量去重；未 ready 不能生成。历史长图支持修改四项布局设置并“重新排版”，无密钥可执行。
-- [ ] Step 4：实现整图适应宽度、缩放/纵向滚动、段落/切片/配图切换，使用缓存缩略图避免整图多份内存；键盘可达、错误定位字段、忙时按钮禁用，鼠标滚轮按焦点作用于参数或预览区域。
-- [ ] Step 5：运行新 UI tests 与 `test_desktop.py/test_desktop_ui.py`；实际 Tkinter 离线样例检查切换、滚动、取消、接受及本地排版。按现有 UI 世界使用 product-design-consistency/ui-ux-pro-max/impeccable，不重建整套视觉规范；提交本任务范围。
+- [x] Step 1：写 `test_modes_preserve_fields_but_clear_stale_plan`、`test_nonproduct_hides_product_requirements`、`test_selection_submits_same_analysis`，确认失败。
+- [x] Step 2：沿用现有 ttk 样式、中文字体、BackgroundJob、取消/错误处理及候选原因输入；长图模式支持六场景、主题/内容、可选素材、折叠布局参数，商品详情才显示商品及平台。
+- [x] Step 3：规划视图显示区块、必需原文、issues、调用数量及用量去重；未 ready 不能生成。历史长图支持修改四项布局设置并“重新排版”，无密钥可执行。
+- [x] Step 4：实现整图适应宽度、缩放/纵向滚动、段落/切片/配图切换，使用缓存缩略图避免整图多份内存；键盘可达、错误定位字段、忙时按钮禁用，鼠标滚轮按焦点作用于参数或预览区域。
+- [x] Step 5：运行新 UI tests 与 `test_desktop.py/test_desktop_ui.py`；实际 Tkinter 离线样例检查切换、滚动、取消、接受及本地排版。按现有 UI 世界使用 product-design-consistency/ui-ux-pro-max/impeccable，不重建整套视觉规范；提交本任务范围。
 
 ### Task 8: 集成验收、独立代码评审与修复闭环
 
@@ -150,12 +150,12 @@
 
 **Interfaces:** demo 只使用确定性规划/配图替身和真实本地字体，生成商品详情、活动宣传、教程三个场景的 result.json、整图、语义段落和切片；不得默认调用真实 API。
 
-- [ ] Step 1：验收六场景完整入口、共享槽只生成一次、原文/表格完整、缺输入及失败状态、独立规划用量与恢复；运行 `python -m pytest tests/test_long_image_acceptance.py -q`。
-- [ ] Step 2：运行全量 `python -m pytest -q`、`python -m ruff check src tests scripts`、`python scripts/export_schema.py`，核对 Schema 差异；每项保存退出码和当前代码快照。构建 wheel 并在已有隔离 venv 验证新增公开符号及旧入口。
-- [ ] Step 3：生成三份离线样例，实际打开整图及各段检查字体、层级、表格、完整性；再用真实 Tkinter 查看长图模式。将视觉缺陷集中修复并确认一次，保留结果及局限。
-- [ ] Step 4：派独立 reviewer 阅读完整 diff、spec、实施计划和验证证据，检查恢复计费、状态、媒体绑定、原文、兼容、UI；不得把自述测试通过当评审依据。
-- [ ] Step 5：将完整 findings 交给另一修复 agent，写有意义的失败回归用例、修复、运行受影响 tests，再由 reviewer 针对修复范围复审。仍有问题按用户要求继续闭环，不静默丢弃；所有 agent 的修改范围和 attempt 可追踪。
-- [ ] Step 6：最终代码冻结后重跑受影响回归及必要全量验证，记录真实结果，提交所有必要改动；报告成品路径、使用方式、测试与评审结果。保留本地任务记录，不推送/发布，不宣称离线验证代表真实模型出图质量。
+- [x] Step 1：验收六场景完整入口、共享槽只生成一次、原文/表格完整、缺输入及失败状态、独立规划用量与恢复；运行 `python -m pytest tests/test_long_image_acceptance.py -q`。
+- [x] Step 2：运行全量 `python -m pytest -q`、`python -m ruff check src tests scripts`、`python scripts/export_schema.py`，核对 Schema 差异；每项保存退出码和当前代码快照。构建 wheel 并在已有隔离 venv 验证新增公开符号及旧入口。
+- [x] Step 3：生成三份离线样例，实际打开整图及各段检查字体、层级、表格、完整性；再用真实 Tkinter 查看长图模式。将视觉缺陷集中修复并确认一次，保留结果及局限。
+- [x] Step 4：派独立 reviewer 阅读完整 diff、spec、实施计划和验证证据，检查恢复计费、状态、媒体绑定、原文、兼容、UI；不得把自述测试通过当评审依据。
+- [x] Step 5：将完整 findings 交给另一修复 agent，写有意义的失败回归用例、修复、运行受影响 tests，再由 reviewer 针对修复范围复审。仍有问题按用户要求继续闭环，不静默丢弃；所有 agent 的修改范围和 attempt 可追踪。
+- [x] Step 6：最终代码冻结后重跑受影响回归及必要全量验证，记录真实结果，提交所有必要改动；报告成品路径、使用方式、测试与评审结果。保留本地任务记录，不推送/发布，不宣称离线验证代表真实模型出图质量。
 
 ## 计划自查与启动顺序
 
@@ -166,3 +166,8 @@
 审批后先核对执行工作区和基线、初始化实施账本。任务 1 完成后启动 2/3；3 完成后 4 可与 2 并行；5 集成后并行 6/7；8 统一验证与评审。若公共类型必须调整，先通知依赖 worker，暂停该接口的消费者再提交兼容更新，禁止同时改同一文件。
 
 **执行方式已确认：多 agent 开发，最终独立代码评审，另一 agent 修复，再复测复审。** 计划审阅只确认实施内容，不重新选择执行方式。
+
+
+## 最终执行验收
+
+当前冻结提交 `9249dc9b1371071f1f2438166f3d60b898baabd7`，全量 1182 passed，Ruff、Schema、隔离wheel新旧入口通过。独立reviewer批准；R1–R4及后续日期边界回归均由其他agent修复并复审关闭。实际样例三整图/18段落视觉检查完成，所有任务记录和证据保留。详见 `../reviews/2026-10-09-general-long-image-code-review.md`。尚未合并、推送或发布。
