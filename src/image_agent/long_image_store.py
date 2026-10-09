@@ -643,7 +643,8 @@ class LongImageRunStore(RunStore):
         Call with pixels from the local renderer, or an already hydrated result to
         reuse identical pixels. No network clients are constructed. The manifest
         binds all files before the pointer changes; state/result follow the pointer
-        and the intent is removed last. Caller holds the run lock.
+        and the intent is removed last. Caller holds the run lock and supplies
+        freshly aggregated section statuses, including when reusing pixels.
         """
         intent = self.pending_delivery_revision()
         if intent is None:
@@ -664,7 +665,13 @@ class LongImageRunStore(RunStore):
         result.run_dir = str(self.directory) if self.directory else None
         result.delivery_revision = revision
         if rendered is not None:
+            section_statuses = {a.artifact_id: a.status for a in result.sections}
             result.sections = [a.model_copy(deep=True) for a in rendered.sections]
+            # Rendering describes pixels; runtime aggregation describes each
+            # semantic section's own dependencies, independently of page status.
+            for section in result.sections:
+                if section.artifact_id in section_statuses:
+                    section.status = section_statuses[section.artifact_id]
             result.page = rendered.page.model_copy(deep=True)
             result.slices = [a.model_copy(deep=True) for a in rendered.slices]
             result.page_checks = rendered.checks
@@ -672,7 +679,10 @@ class LongImageRunStore(RunStore):
         if not failed:
             self._validate_complete_delivery(result, intent)
         for artifact in self._artifacts(result):
-            artifact.status = "failed" if failed else result.status
+            if failed:
+                artifact.status = "failed"
+            elif artifact.kind != "section":
+                artifact.status = result.status
             artifact.delivery_revision = revision
             if failed:
                 artifact.availability = "stale" if artifact.file_path else "absent"
