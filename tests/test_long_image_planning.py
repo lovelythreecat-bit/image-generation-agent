@@ -209,6 +209,44 @@ async def test_public_promotion_analyze_uses_supplied_date_or_optional_date(monk
 async def test_public_promotion_accepts_yearless_date_without_changing_copy(
     monkeypatch, date, source, entrypoint
 ):
+    await _check_public_promotion_date(monkeypatch, date, source, entrypoint, terminator="。")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "date,source",
+    [
+        ("10/12.", "content_brief"),
+        ("10-12.", "content_brief"),
+        ("10/12-10/15。", "content_brief"),
+        ("10-12-10-15", "required_copy"),
+        ("10/12~10/15", "title"),
+        ("10/12～10/15", "required_copy"),
+        ("10/12 to 10/15", "content_brief"),
+        ("10/12至10/15", "required_copy"),
+        ("10/12—10/15", "title"),
+        ("10/12-15", "content_brief"),
+        ("(10/12)", "content_brief"),
+        ("（10-12）", "required_copy"),
+        ("10/12!", "title"),
+        ("10月12日至15日", "content_brief"),
+        ("十月十二日", "required_copy"),
+        ("Oct. 12-15", "content_brief"),
+        ("October 12 to 15", "title"),
+        ("12 October", "required_copy"),
+        ("31/12.", "required_copy"),
+        ("１０/１２。", "title"),
+        ("10/12/2026.", "content_brief"),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["analyze", "create"])
+async def test_public_promotion_date_boundaries_preserve_provided_text(
+    monkeypatch, date, source, entrypoint
+):
+    await _check_public_promotion_date(monkeypatch, date, source, entrypoint, terminator="")
+
+
+async def _check_public_promotion_date(monkeypatch, date, source, entrypoint, *, terminator):
     import httpx
 
     from image_agent import analyze_long_image, create_long_image
@@ -216,7 +254,7 @@ async def test_public_promotion_accepts_yearless_date_without_changing_copy(
     request = LongImageRequest(
         scene="promotion",
         title=date if source == "title" else "活动",
-        content_brief=f"必须展示活动日期：{date}。"
+        content_brief=f"必须展示活动日期：{date}{terminator}"
         if source == "content_brief"
         else "必须展示活动日期；使用用户内容中提供的日期。",
         required_copy=[{"requirement_id": "date", "text": date}]
@@ -278,6 +316,74 @@ async def test_public_promotion_accepts_yearless_date_without_changing_copy(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "brief",
+    [
+        "必须展示活动日期（待定）。",
+        "必须展示活动日期(待定)。",
+        "必须展示活动日期：（待定）。",
+        "必须展示活动日期: (TBD).",
+        "必须展示活动日期，待定。",
+        "必须展示活动日期【待定】。",
+        "必须展示活动日期[待定]。",
+        "必须展示活动日期—待定。",
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["analyze", "create"])
+async def test_public_unknown_date_annotation_overrides_other_short_date_copy(
+    monkeypatch, brief, entrypoint
+):
+    import httpx
+
+    from image_agent import analyze_long_image, create_long_image
+
+    request = LongImageRequest(
+        scene="promotion",
+        title="活动",
+        content_brief=brief,
+        required_copy=[{"requirement_id": "stamp", "text": "10/12"}],
+    )
+    data = plan_for(request)
+    for index, section in enumerate(data["sections"][1:], 1):
+        section["text_units"] = [{"unit_id": f"body-{index}", "kind": "body", "text": "活动亮点"}]
+    posts = []
+
+    def respond(http_request):
+        posts.append(http_request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"status": "ready", "plan": data}, ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw)
+    )
+    config = AgentConfig(openrouter_api_key="offline")
+    if entrypoint == "analyze":
+        result = await analyze_long_image(request, config)
+        usage = result.usage
+    else:
+        result = await create_long_image(request, config)
+        usage = result.usage.execution
+    assert result.status == "needs_input", (result.status, len(posts), usage)
+    assert result.plan is None
+    assert result.issues[0].code == "missing_activity_date"
+    assert posts == []
+    assert usage == {"vision_calls": 0, "image_calls": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "copy",
     [
         "型号 AB10-12X",
@@ -289,6 +395,13 @@ async def test_public_promotion_accepts_yearless_date_without_changing_copy(
         "编号12345-67890",
         "13/40",
         "2026-10",
+        "尺寸10.5-12.5cm",
+        "10.5-12.5 cm",
+        "10/12.5cm",
+        "10/12.5 cm",
+        "12.5/10 cm",
+        "型号：AB.10-12",
+        "尺寸(10-12 cm)",
     ],
 )
 async def test_public_promotion_does_not_use_model_or_size_numbers_as_yearless_dates(

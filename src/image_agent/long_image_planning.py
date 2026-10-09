@@ -82,7 +82,7 @@ def missing_input_issues(request):
             # unknown facts elsewhere in the brief (such as an undecided title).
             unspecified_date |= bool(
                 re.match(
-                    r"\s*(?:必须展示|需要展示|需展示|must be displayed)?\s*[,，:：]?\s*"
+                    r"\s*(?:必须展示|需要展示|需展示|must be displayed)?[\W_]*"
                     r"(?:目前|仍然?|暂时)?\s*(?:待定|未定|尚未|未确定|未知|待补充|to be determined|tbd)",
                     remainder,
                     re.I,
@@ -101,28 +101,45 @@ def missing_input_issues(request):
             *request.service_notes,
         ]
     )
-    # MM/DD and MM-DD do not require a year. Match complete plausible month/day
-    # tokens, rather than substrings of model identifiers or dimension ranges.
-    short_date = any(
-        not re.search(
-            r"(?:型号|编号|货号|款号|尺寸|规格|比例|model|size|sku|ratio)\s*[:：]?\s*$",
+    # Look for supplied date candidates, not a canonical date spelling. Sentence
+    # punctuation and ranges are valid; date orientation/year are planner concerns.
+    # Keep decimal measurements and explicitly labeled model/size numbers separate.
+    months = (
+        r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    )
+    day = r"\d{1,2}(?:st|nd|rd|th)?"
+    date_token = (
+        rf"(?:\d{{1,2}}[-/]\d{{1,2}}(?:[-/]\d{{2,4}})?|"
+        rf"{months}\.?[ \t]*{day}|{day}[ \t]*{months}\.?)"
+    )
+    supplied_date = any(
+        all(
+            1 <= int(a) <= 31 and 1 <= int(b) <= 31 and min(int(a), int(b)) <= 12
+            for a, b in re.findall(r"(\d{1,2})[-/](\d{1,2})", match.group())
+        )
+        and not re.search(
+            r"(?:型号|编号|货号|款号|尺寸|规格|比例|model|size|sku|ratio)\s*[:：]?\s*[\[（(【「『]*\s*(?:[A-Za-z0-9._-]+\s*)?$",
             content[: match.start()][-40:],
             re.I,
         )
         and not re.match(
-            r"[ \t]*(?:mm|cm|kg|ml|inch|inches|m|g|l)(?![A-Za-z])|[ \t]*(?:毫米|厘米|千克|公斤|米|克|毫升|升)",
+            r"[ \t）)\]】]*(?:mm|cm|kg|ml|inch|inches|m|g|l)(?![A-Za-z])|[ \t）)\]】]*(?:毫米|厘米|千克|公斤|米|克|毫升|升)",
             content[match.end() :],
             re.I,
         )
         for match in re.finditer(
-            r"(?<![0-9A-Za-z./-])(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12][0-9]|3[01])(?![0-9A-Za-z./-])",
+            rf"(?<![\dA-Za-z/-])(?<!\d[.．]){date_token}"
+            rf"(?:[ \t]*(?:[-~～—–至]|to)[ \t]*(?:{date_token}|{day}))?"
+            r"(?![\dA-Za-z/-]|[.．]\d)",
             content,
+            re.I,
         )
     )
     if unspecified_date or not (
-        short_date
+        supplied_date
         or re.search(
-            r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,4}\s*(?:年|月|日)|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)",
+            r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,4}\s*(?:年|月|日)|[一二三四五六七八九十廿]{1,3}月|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)",
             content,
         )
     ):
