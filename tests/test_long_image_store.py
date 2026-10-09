@@ -6,7 +6,7 @@ from copy import deepcopy
 import pytest
 
 from image_agent.config import AgentConfig
-from image_agent.errors import AgentError, OutputError
+from image_agent.errors import AgentError, ConfigurationError, OutputError
 from image_agent.execution import ExecutionPolicy
 from image_agent.long_image_models import (
     LongImageArtifact,
@@ -108,6 +108,139 @@ def test_unsupported_object_run_metadata_remains_a_clear_validation_error(tmp_pa
         store.load_metadata()
 
     assert caught.value.code == "validation"
+
+
+METADATA_DAMAGE = [
+    "header:only",
+    *(f"missing:{field}" for field in (
+        "run_id", "request", "request_hash", "request_fingerprint", "inputs", "policy",
+        "policy_fingerprint", "config_fingerprint",
+    )),
+    "run_id:null", "run_id:number", "run_id:empty", "request_hash:object",
+    "request_fingerprint:number", "policy_fingerprint:null", "config_fingerprint:list",
+    "request:null", "request:list", "request:missing-title", "request:missing-materials",
+    "request:missing-empty-materials",
+    "request:materials-object", "request:invalid-options", "policy:null", "policy:list",
+    "policy:invalid-limit", "inputs:null", "inputs:object", "ref:null", "ref:list",
+    *(f"ref:missing-{field}" for field in ("material_id", "path", "sha256", "order", "role_hint")),
+    "ref:path-list", "ref:hash-object", "ref:order-object", "ref:role-list",
+    "planning_result:list", "planning_result:invalid", "planning_record:list",
+    "planning_record:invalid",
+]
+
+
+def damaged_metadata(damage):
+    """Corrupt a real serialized run; recompute hashes to reach schema validation."""
+    from image_agent.long_image_store import content_hash
+
+    data = picture((20, 10))
+    empty = damage == "request:missing-empty-materials"
+    request, _ = request_and_plan(
+        materials=[] if empty else [{"material_id": "m1", "source": {"data": data}}]
+    )
+    material = LoadedMaterial(
+        material_id="m1", data=data, sha256=digest(data), order=0, role_hint="auto"
+    )
+    store = store_type()()
+    store.initialize(request, () if empty else (material,), AgentConfig(), ExecutionPolicy())
+    meta = store.json("run.json")
+    store.close()
+    field, change = damage.split(":", 1)
+    values = {"null": None, "number": 3, "empty": "", "list": [], "object": {}}
+    if field == "header":
+        return {"version": 2, "task_type": "long_image"}, data
+    if field == "missing":
+        del meta[change]
+    elif field == "ref":
+        if change in ("null", "list"):
+            meta["inputs"][0] = values[change]
+        elif change.startswith("missing-"):
+            del meta["inputs"][0][change.removeprefix("missing-")]
+        else:
+            key, kind = change.split("-", 1)
+            key = {"hash": "sha256", "role": "role_hint"}.get(key, key)
+            meta["inputs"][0][key] = values[kind]
+    elif field == "request" and change.startswith("missing-"):
+        del meta["request"]["materials" if empty else change.removeprefix("missing-")]
+    elif damage == "request:materials-object":
+        meta["request"]["materials"] = {}
+    elif damage == "request:invalid-options":
+        meta["request"]["options"]["width"] = 1
+    elif damage == "policy:invalid-limit":
+        meta["policy"]["max_image_calls"] = -1
+    elif change == "invalid":
+        meta[field] = {"unexpected": True}
+    else:
+        meta[field] = values[change]
+    for payload, hash_field in (("request", "request_hash"), ("policy", "policy_fingerprint")):
+        if payload in meta and hash_field in meta and field != hash_field:
+            meta[hash_field] = content_hash(meta[payload])
+    return meta, data
+
+
+@pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize("damage", METADATA_DAMAGE)
+def test_supported_run_metadata_shape_is_a_controlled_output_error(tmp_path, persisted, damage):
+    meta, data = damaged_metadata(damage)
+    store = store_type()(tmp_path if persisted else None)
+    store.write("inputs/00-m1.bin", data)
+    store.json("run.json", meta)
+
+    with pytest.raises(OutputError) as caught:
+        store.load_metadata()
+
+    assert caught.value.code == "output"
+    assert caught.value.kind == "output"
+    assert "metadata" in str(caught.value)
+
+
+@pytest.mark.parametrize("damage", METADATA_DAMAGE)
+@pytest.mark.parametrize(
+    "entry", ["render_long_image", "resume_long_image", "accept_long_image_candidate"]
+)
+@pytest.mark.asyncio
+async def test_public_local_paths_reject_damaged_supported_metadata_before_side_effects(
+    tmp_path, monkeypatch, damage, entry
+):
+    import image_agent
+    import image_agent.long_image_runtime as runtime
+    import image_agent.long_image_store as storage
+
+    meta, data = damaged_metadata(damage)
+    store = store_type()(tmp_path)
+    store.write("inputs/00-m1.bin", data)
+    store.json("run.json", meta)
+    before = (tmp_path / "run.json").read_bytes()
+
+    def denied(*args, **kwargs):
+        raise AssertionError("damaged metadata must fail before configuration, clients or budget")
+
+    monkeypatch.setattr(AgentConfig, "from_env", denied)
+    monkeypatch.setattr(runtime, "HttpTransport", denied)
+    monkeypatch.setattr(runtime, "_lazy_dependencies", denied)
+    monkeypatch.setattr(storage, "BudgetLedger", denied)
+    operation = getattr(image_agent, entry)
+    if entry == "accept_long_image_candidate":
+        with pytest.raises(OutputError) as caught:
+            await operation(tmp_path, "slot", "candidate", reason="已确认")
+        assert caught.value.code == "output"
+        assert caught.value.kind == "output"
+        assert "metadata" in str(caught.value)
+    else:
+        result = await operation(tmp_path)
+        assert result.status == "failed"
+        assert result.error_info.code == "output"
+        assert result.error_info.kind == "output"
+        assert "metadata" in result.error_info.message
+        assert result.output_errors == [result.error_info]
+        assert result.page is None
+        assert result.image_assets == []
+
+    assert (tmp_path / "run.json").read_bytes() == before
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "budget.sqlite").exists()
+    assert not (tmp_path / "delivery-current.json").exists()
+    assert not (tmp_path / "deliveries").exists()
 
 
 def planning_record(store, request, plan):
@@ -330,6 +463,67 @@ def saved_delivery(tmp_path, status="succeeded"):
     )
     store.commit_delivery_revision(result, rendered)
     return store, request, result, rendered
+
+
+@pytest.mark.parametrize(
+    "entry", ["render_long_image", "resume_long_image", "accept_long_image_candidate"]
+)
+@pytest.mark.asyncio
+async def test_damaged_metadata_does_not_qualify_existing_delivery(tmp_path, monkeypatch, entry):
+    import image_agent
+    import image_agent.long_image_runtime as runtime
+    import image_agent.long_image_store as storage
+
+    store, _, _, _ = saved_delivery(tmp_path)
+    pointer = store.path("delivery-current.json").read_bytes()
+    budget = store.path("budget.sqlite").read_bytes()
+    store.json("run.json", {"version": 2, "task_type": "long_image"})
+
+    def denied(*args, **kwargs):
+        raise AssertionError("damaged metadata must fail before clients or budget")
+
+    monkeypatch.setattr(AgentConfig, "from_env", denied)
+    monkeypatch.setattr(runtime, "HttpTransport", denied)
+    monkeypatch.setattr(runtime, "_lazy_dependencies", denied)
+    monkeypatch.setattr(storage, "BudgetLedger", denied)
+    operation = getattr(image_agent, entry)
+    if entry == "accept_long_image_candidate":
+        with pytest.raises(OutputError):
+            await operation(tmp_path, "slot", "c1", reason="已确认")
+    else:
+        result = await operation(tmp_path)
+        assert result.status == "failed"
+        assert result.error_info.code == "output"
+        assert result.output_errors == [result.error_info]
+        assert result.delivery_revision == 1
+        assert all(a.image is None for a in result.image_assets)
+        for artifact in [*result.sections, result.page, *result.slices]:
+            assert artifact.status == "failed"
+            assert artifact.availability == "stale"
+            assert artifact.image is None
+
+    assert store.path("delivery-current.json").read_bytes() == pointer
+    assert store.path("budget.sqlite").read_bytes() == budget
+    assert not store.exists("deliveries/2/manifest.json")
+
+
+def test_valid_metadata_preserves_configuration_mismatch_error(tmp_path):
+    store, _, _ = initialized(tmp_path)
+    with pytest.raises(ConfigurationError, match="execution configuration changed"):
+        store.load_metadata(AgentConfig(model_pro="different/model"))
+
+
+@pytest.mark.parametrize("field", ["request", "policy"])
+def test_run_metadata_integrity_checks_remain_effective(tmp_path, field):
+    store, _, _ = initialized(tmp_path)
+    meta = store.json("run.json")
+    if field == "request":
+        meta[field]["title"] = "改写标题"
+    else:
+        meta[field]["max_image_calls"] = 1
+    store.json("run.json", meta)
+    with pytest.raises(OutputError, match="integrity validation failed"):
+        store.load_metadata()
 
 
 @pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])

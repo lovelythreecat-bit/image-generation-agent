@@ -13,19 +13,21 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from uuid import uuid4
 
 from PIL import Image
+from pydantic import ValidationError
 
 from .errors import AgentError, ConfigurationError, OutputError, make_error_info
 from .execution import BudgetLedger, ExecutionPolicy
 from .long_image_models import (
     LongImageOptions,
     LongImagePlan,
+    LongImagePlanningResult,
     LongImageRequest,
     LongImageResult,
     LongPlanningRecord,
     LongSlotAsset,
 )
 from .long_image_requirements import planning_fingerprint, validate_long_image_plan
-from .models import MaterialAnalysis
+from .models import LoadedMaterial, MaterialAnalysis
 from .run_store import RunStore, config_fingerprint, digest
 
 
@@ -162,6 +164,7 @@ class LongImageRunStore(RunStore):
             raise OutputError("run metadata must be a JSON object")
         if meta.get("version") != 2 or meta.get("task_type") != "long_image":
             raise AgentError("only version 2 long_image runs are supported")
+        self._validate_metadata_shape(meta)
         if config is not None and config_fingerprint(config) != meta["config_fingerprint"]:
             raise ConfigurationError("execution configuration changed")
         if (
@@ -169,7 +172,23 @@ class LongImageRunStore(RunStore):
             or content_hash(meta["policy"]) != meta["policy_fingerprint"]
         ):
             raise OutputError("run request or policy integrity validation failed")
-        request = LongImageRequest.model_validate(meta["request"])
+        try:
+            request = LongImageRequest.model_validate(meta["request"])
+            ExecutionPolicy.model_validate_json(json.dumps(meta["policy"]), strict=True)
+            for ref in meta["inputs"]:
+                LoadedMaterial.model_validate(
+                    {k: ref[k] for k in ("material_id", "sha256", "order", "role_hint")}
+                    | {"data": b""},
+                    strict=True,
+                )
+            for name, model in (
+                ("planning_record", LongPlanningRecord),
+                ("planning_result", LongImagePlanningResult),
+            ):
+                if meta.get(name) is not None:
+                    model.model_validate(meta[name])
+        except ValidationError:
+            raise OutputError("run metadata contains an invalid persisted schema") from None
         refs = meta["inputs"]
         if [r["material_id"] for r in refs] != [m.material_id for m in request.materials]:
             raise OutputError("input bindings differ from persisted request")
@@ -183,6 +202,36 @@ class LongImageRunStore(RunStore):
         ):
             raise OutputError("request fingerprint integrity validation failed")
         return meta
+
+    @staticmethod
+    def _validate_metadata_shape(meta):
+        """Check JSON bindings before indexing them or opening local resources.
+
+        Optional planning fields stay optional. Schema parsing below verifies
+        their contents; neither check grants trust to a planning descriptor.
+        """
+        string_fields = (
+            "run_id", "request_hash", "request_fingerprint", "policy_fingerprint",
+            "config_fingerprint",
+        )
+        if any(not isinstance(meta.get(k), str) or not meta[k].strip() for k in string_fields):
+            raise OutputError("run metadata is missing a required string binding")
+        if (
+            not isinstance(meta.get("request"), dict)
+            or not isinstance(meta["request"].get("materials"), list)
+            or not isinstance(meta.get("policy"), dict)
+            or not isinstance(meta.get("inputs"), list)
+        ):
+            raise OutputError("run metadata request, policy or inputs have an invalid shape")
+        required = {"material_id", "path", "sha256", "order", "role_hint"}
+        for ref in meta["inputs"]:
+            if (
+                not isinstance(ref, dict)
+                or not required <= ref.keys()
+                or any(not isinstance(ref[k], str) or not ref[k] for k in required - {"order"})
+                or type(ref["order"]) is not int
+            ):
+                raise OutputError("run metadata contains an invalid input reference")
 
     def request(self):
         meta = self.load_metadata()
