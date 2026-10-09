@@ -435,6 +435,99 @@ async def test_public_promotion_does_not_use_model_or_size_numbers_as_yearless_d
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "brief,needs_input",
+    [
+        ("活动日期不需展示。", False),
+        ("活动日期（不需展示）。", False),
+        ("活动日期(不需展示)。", False),
+        ("活动日期【不需要展示】。", False),
+        ("活动日期不需要展示。", False),
+        ("Must not display the event date.", False),
+        ("Cannot show the event date.", False),
+        ("Should not display the event date.", False),
+        ("The event date should not be displayed.", False),
+        pytest.param("Mustn't display the event date.", False, id="ascii-contraction"),
+        pytest.param("Can’t show the event date.", False, id="curly-contraction"),
+        pytest.param("不能展示活动日期。", False, id="chinese-modal-cannot"),
+        pytest.param("不可显示活动日期。", False, id="chinese-modal-prohibited"),
+        pytest.param("活动日期必须不展示。", False, id="chinese-modal-postfix"),
+        pytest.param("不应该展示活动日期。", False, id="chinese-modal-should-not"),
+        pytest.param(
+            "不能展示活动日期；必须展示开售日期。", True, id="chinese-modal-independent-required"
+        ),
+        ("活动日期不需展示，但必须展示开售日期。", True),
+        ("必须展示活动日期；开售日期（不需展示）。", True),
+        ("Must not display the event date; must display the event date.", True),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["analyze", "create"])
+async def test_public_date_exclusion_is_local_to_its_clause(
+    monkeypatch, brief, needs_input, entrypoint
+):
+    import httpx
+
+    from image_agent import analyze_long_image, create_long_image
+
+    exact_copy = "活动亮点原文"
+    request = LongImageRequest(
+        scene="promotion",
+        title="活动",
+        content_brief=brief,
+        required_copy=[{"requirement_id": "copy", "text": exact_copy}],
+    )
+    data = plan_for(request)
+    for index, section in enumerate(data["sections"][1:], 1):
+        section["text_units"] = [{"unit_id": f"body-{index}", "kind": "body", "text": "活动亮点"}]
+    posts = []
+
+    def respond(http_request):
+        posts.append(http_request)
+        assert http_request.url.path.endswith("/chat/completions")
+        payload = json.dumps(json.loads(http_request.content), ensure_ascii=False)
+        assert brief in payload
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps({"status": "ready", "plan": data})}}]
+            },
+        )
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw)
+    )
+    config = AgentConfig(openrouter_api_key="offline")
+    if entrypoint == "analyze":
+        result = await analyze_long_image(request, config)
+        usage = result.usage
+    else:
+        result = await create_long_image(request, config)
+        usage = result.usage.execution
+    assert request.content_brief == brief
+    if needs_input:
+        assert result.status == "needs_input", (result.status, len(posts), usage)
+        assert result.plan is None
+        assert result.issues[0].code == "missing_activity_date"
+        assert posts == []
+        assert usage == {"vision_calls": 0, "image_calls": 0}
+    else:
+        assert result.status == ("ready" if entrypoint == "analyze" else "succeeded"), (
+            result.status,
+            len(posts),
+            usage,
+        )
+        assert result.issues == []
+        assert exact_copy in [
+            u.text for section in result.plan.sections for u in section.text_units
+        ]
+        if entrypoint == "create":
+            assert exact_copy in [u["text"] for u in result.page.layout["text_units"]]
+        assert len(posts) == 1
+        assert usage == {"vision_calls": 1, "image_calls": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "brief,has_stamp",
     [
         ("必须展示活动日期，尚未确定。", True),

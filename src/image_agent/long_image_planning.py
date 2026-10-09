@@ -59,17 +59,22 @@ def missing_input_issues(request):
     # left to planning; this early, zero-cost gate handles explicit demands only.
     required_date = unspecified_date = False
     boundary = r"[，,。.;；\n]|但是|不过|然而|但|\bbut\b"
+    negative = (
+        r"(?:(?:必须|需要|应该|应当|需)\s*)?"
+        r"(?:不需要|无需|不必|不要|不用|不需|禁止|不得|不能|不可|不应(?:该|当)?|不展示|不显示|可不)|"
+        r"\b(?:do[\s-]+not|don['’]t|no[\s-]+need|(?:is[\s-]+)?not[\s-]+required|"
+        r"(?:must|should|can|could|may|will|would)[\s-]+not|cannot|"
+        r"(?:can|mustn|shouldn|couldn|wouldn|won)['’]t)\b"
+    )
     for mention in re.finditer(
         r"活动日期|活动时间|开售日期|event date", request.content_brief, re.I
     ):
         before = re.split(boundary, request.content_brief[: mention.start()], flags=re.I)[-1]
         remainder = request.content_brief[mention.end() :]
         after = re.split(boundary, remainder, flags=re.I)[0]
-        if re.search(
-            r"不需要|无需|不必|不要|不用|不需|禁止|不得|不展示|不显示|do not|don't|no need|not required",
-            before,
-            re.I,
-        ) or re.match(r"\s*(?:不是|无需|不必|不需要|不用|可不|is not required)", after, re.I):
+        if re.search(negative, before, re.I) or re.match(
+            rf"[\W_]*(?:不是|{negative})", after, re.I
+        ):
             continue
         if re.search(
             r"必须|需要|需|展示|显示|呈现|标注|注明|写出|must|require|display|show|include",
