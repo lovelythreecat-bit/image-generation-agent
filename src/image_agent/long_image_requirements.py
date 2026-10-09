@@ -71,8 +71,10 @@ def collect_text_requirements(request: LongImageRequest) -> list[LongImageRequir
 
 
 def planning_fingerprint(request: LongImageRequest, material_hashes: dict[str, str]) -> str:
-    data = request.model_dump(mode="json", exclude={"materials", "output_dir", "request_id"})
-    data["options"].pop("font_path", None)
+    # Local layout options belong to the rendering fingerprint, not content planning.
+    data = request.model_dump(
+        mode="json", exclude={"materials", "options", "output_dir", "request_id"}
+    )
     data["materials"] = [m.model_dump(mode="json", exclude={"source"}) for m in request.materials]
     return _content_hash({"request": data, "material_hashes": material_hashes})
 

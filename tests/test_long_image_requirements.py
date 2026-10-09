@@ -1,7 +1,7 @@
 import pytest
 
 from image_agent.errors import AgentError
-from image_agent.long_image_models import LongImagePlan, LongImageRequest
+from image_agent.long_image_models import LongImageOptions, LongImagePlan, LongImageRequest
 from image_agent.long_image_requirements import (
     collect_text_requirements,
     planning_fingerprint,
@@ -139,6 +139,69 @@ def test_material_hashes_and_input_changes_invalidate_fingerprint():
     request.content_brief = "不同的操作"
     invalid(request, plan)
     assert planning_fingerprint(request, {"m": "a"}) != planning_fingerprint(request, {"m": "b"})
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"width": 1000},
+        {"theme": "warm"},
+        {"slice_height": 2000},
+        {"font_path": "local-font.ttf"},
+        {"width": 1000, "theme": "premium", "slice_height": 2000, "font_path": "font.ttf"},
+    ],
+)
+def test_local_options_preserve_planning_fingerprint_and_plan(options):
+    request, plan = request_and_plan()
+    changed = request.model_copy(update={"options": LongImageOptions(**options)})
+    assert planning_fingerprint(changed, {}) == plan.input_fingerprint
+    validate_long_image_plan(changed, plan, material_hashes={})
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"title": "新标题"},
+        {"content_brief": "不同的操作"},
+        {"scene": "brand_intro"},
+        {"style_hint": "温暖插画"},
+        {"product_specs": [{"name": "容量", "value": "１２ ml"}]},
+        {"service_notes": ["七天退换"]},
+        {"required_copy": [{"requirement_id": "copy", "text": "必须保留"}]},
+    ],
+)
+def test_content_changes_still_invalidate_planning_fingerprint(changes):
+    request, plan = request_and_plan()
+    changed = LongImageRequest.model_validate(request.model_dump() | changes)
+    assert planning_fingerprint(changed, {}) != plan.input_fingerprint
+    invalid(changed, plan)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"product_context": {"product_name": "新杯子", "category": "日用品"}},
+        {"selection": {"mode": "explicit", "subject_ids": ["subject-1"]}},
+        {
+            "materials": [
+                {"material_id": "m1", "source": {"data": b"material"}, "subject_hint": "杯身"}
+            ]
+        },
+    ],
+)
+def test_product_context_selection_and_material_hints_invalidate_fingerprint(changes):
+    request = LongImageRequest(
+        scene="product_detail",
+        title="杯子",
+        content_brief="介绍杯子",
+        product_context={"product_name": "杯子", "category": "日用品"},
+        materials=[{"material_id": "m1", "source": {"data": b"material"}}],
+    )
+    changed = LongImageRequest.model_validate(
+        request.model_dump() | {"materials": request.materials} | changes
+    )
+    hashes = {"m1": "material-sha256"}
+    assert planning_fingerprint(changed, hashes) != planning_fingerprint(request, hashes)
 
 
 def test_table_cells_keep_original_names_and_values():

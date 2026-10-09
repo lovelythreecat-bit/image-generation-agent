@@ -10,6 +10,7 @@ from image_agent.errors import AgentError, OutputError
 from image_agent.execution import ExecutionPolicy
 from image_agent.long_image_models import (
     LongImageArtifact,
+    LongImageOptions,
     LongImagePlanningResult,
     LongImageResult,
     LongImageSlot,
@@ -92,6 +93,49 @@ def test_memory_record_can_be_resolved_only_through_original_binding():
     forged = record.model_copy(update={"record_id": "unregistered"})
     with pytest.raises(AgentError):
         store_type().resolve_planning_record(forged, request=request, plan=plan)
+
+
+@pytest.mark.parametrize("persisted", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"width": 1000},
+        {"theme": "warm"},
+        {"slice_height": 2000},
+        {"font_path": "local-font.ttf"},
+        {"width": 1000, "theme": "premium", "slice_height": 2000, "font_path": "font.ttf"},
+    ],
+)
+def test_layout_changes_reuse_verified_plan_without_reserving_budget(tmp_path, persisted, options):
+    planning_store, request, plan = initialized(tmp_path / "planning" if persisted else None)
+    record = planning_record(planning_store, request, plan)
+    changed = request.model_copy(update={"options": LongImageOptions(**options)})
+    generation_store = store_type()(tmp_path / "generation" if persisted else None)
+
+    for _ in range(2):
+        loaded = planning_store.load_planning_record(record.record_id, request=changed, plan=plan)
+        resolved = generation_store.resolve_planning_record(record, request=changed, plan=plan)
+        assert loaded == resolved == record
+        assert resolved.usage == {"image_calls": 0, "vision_calls": 1}
+
+    generation_store.initialize(
+        changed,
+        (),
+        AgentConfig(),
+        ExecutionPolicy(),
+        planning_result=LongImagePlanningResult(
+            planning_id=record.planning_id, status="ready", plan=plan, record=resolved
+        ),
+    )
+    meta = generation_store.load_metadata()
+    assert meta["planning_record"] == record.model_dump(mode="json")
+    assert meta["planning_result"]["plan"] == plan.model_dump(mode="json")
+    assert generation_store.request().options == changed.options
+    assert planning_store.request().options == request.options
+    with planning_store.budget() as ledger:
+        assert ledger.usage() == {"image_calls": 0, "vision_calls": 1}
+    with generation_store.budget() as ledger:
+        assert ledger.usage() == {"image_calls": 0, "vision_calls": 0}
 
 
 @pytest.mark.parametrize(
