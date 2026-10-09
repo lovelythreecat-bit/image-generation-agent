@@ -110,6 +110,7 @@ def ensure_page_copy_isolated(plan, text, *, analysis=None, code="plan_invalid")
 
 
 def validate_slot_copy_isolation(plan, analysis=None):
+    ensure_page_copy_isolated(plan, plan.visual_direction, analysis=analysis)
     for slot in plan.image_slots:
         if slot.source == "generate":
             ensure_page_copy_isolated(plan, slot.prompt, analysis=analysis)
@@ -188,7 +189,7 @@ class LongImageVisionClient(VisionClient):
             "Generated slots need concrete visual prompt and supported ratio. Every slot must be referenced, with matching reverse section IDs. "
             "Keep one shared visual_direction for all slots. Place supplied requirements in exact reading order, preserving every code point and occurrence. "
             "One text_unit satisfies one requirement occurrence. Page/section text is drawn by the local renderer, "
-            "NEVER put page copy, title, dates, specs or service text in image-slot prompts or slot_visual requirements. "
+            "NEVER put page copy, title, dates, specs or service text in visual_direction, image-slot prompts or slot_visual requirements. "
             "Product-native labels/artwork remain image evidence and must be preserved. "
             "For product-generated slots choose role hero/scene/feature/closeup according to this slot's intended framing. "
             "Only user-authored visual instructions may become slot_visual requirements; bind exact source pointer/range and reverse slot IDs. "

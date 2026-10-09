@@ -51,26 +51,69 @@ def planning_service_names(request, config):
 
 
 def missing_input_issues(request):
-    text = request.content_brief
-    if request.scene == "promotion" and re.search(
-        r"(?:活动日期|活动时间|开售日期|event date)", text, re.I
+    if request.scene != "promotion":
+        return []
+    # A date mention alone is not a demand to display a missing fact. Keep
+    # negation local to its clause so excluding one date cannot cancel a separate
+    # required date ("不需要开售日期，但必须展示活动日期"). Ambiguous prose is
+    # left to planning; this early, zero-cost gate handles explicit demands only.
+    required_date = unspecified_date = False
+    boundary = r"[，,。.;；\n]|但是|不过|然而|但|\bbut\b"
+    for mention in re.finditer(
+        r"活动日期|活动时间|开售日期|event date", request.content_brief, re.I
     ):
-        known_date = re.search(
-            r"\d{1,4}\s*(?:年|月|日|[-/])|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)", text
-        )
-        unspecified = re.search(
-            r"(?:待定|未定|尚未|未确定|未知|待补充|to be determined|tbd)", text, re.I
-        )
-        if not known_date or unspecified:
-            return [
-                LongImageIssue(
-                    issue_id="activity-date",
-                    code="missing_activity_date",
-                    message="请补充必须展示的活动日期。",
-                    resolution="input",
-                    field="content_brief",
+        before = re.split(boundary, request.content_brief[: mention.start()], flags=re.I)[-1]
+        remainder = request.content_brief[mention.end() :]
+        after = re.split(boundary, remainder, flags=re.I)[0]
+        if re.search(
+            r"不需要|无需|不必|不要|不用|不需|禁止|不得|不展示|不显示|do not|don't|no need|not required",
+            before,
+            re.I,
+        ) or re.match(r"\s*(?:不是|无需|不必|不需要|不用|可不|is not required)", after, re.I):
+            continue
+        if re.search(
+            r"必须|需要|需|展示|显示|呈现|标注|注明|写出|must|require|display|show|include",
+            before,
+            re.I,
+        ) or re.search(r"必须|需要|需展示|需显示|must|is required", after, re.I):
+            required_date = True
+            # Explicitly unknown activity dates outrank other date-like copy.
+            # Bind the unknown marker to this required date, never to arbitrary
+            # unknown facts elsewhere in the brief (such as an undecided title).
+            unspecified_date |= bool(
+                re.match(
+                    r"\s*(?:必须展示|需要展示|需展示|must be displayed)?\s*[,，:：]?\s*"
+                    r"(?:目前|仍然?|暂时)?\s*(?:待定|未定|尚未|未确定|未知|待补充|to be determined|tbd)",
+                    remainder,
+                    re.I,
                 )
-            ]
+            )
+    if not required_date:
+        return []
+    # Content may supply the date outside the brief, including exact copy and
+    # title. Visual hints and model output are not sources for this fact.
+    content = "\n".join(
+        [
+            request.title,
+            request.content_brief,
+            *(copy.text for copy in request.required_copy),
+            *(value for spec in request.product_specs for value in (spec.name, spec.value)),
+            *request.service_notes,
+        ]
+    )
+    if unspecified_date or not re.search(
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,4}\s*(?:年|月|日)|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)",
+        content,
+    ):
+        return [
+            LongImageIssue(
+                issue_id="activity-date",
+                code="missing_activity_date",
+                message="请补充必须展示的活动日期。",
+                resolution="input",
+                field="content_brief",
+            )
+        ]
     return []
 
 

@@ -1,5 +1,6 @@
 import io
 import json
+import re
 from dataclasses import dataclass
 
 import pytest
@@ -137,6 +138,218 @@ async def test_required_date_missing_yields_field_issue():
     assert result.issues[0].code == "missing_activity_date"
     assert usage["vision_calls"] == 0
     assert transport.payloads == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"required_copy": [{"requirement_id": "date", "text": "2026年10月12日"}]},
+        {"title": "2026年10月12日活动"},
+        {"content_brief": "必须展示活动日期；2026-10-12 开售。"},
+        {"content_brief": "仅宣传活动亮点，不需要展示活动日期。"},
+        {"content_brief": "活动日期不是本次宣传内容，只介绍亮点。"},
+        {"content_brief": "介绍活动时间的安排方法。"},
+        {"content_brief": "Do not display the event date; focus on highlights."},
+        {
+            "content_brief": "标题尚未确定；必须展示活动日期，使用原文栏已给日期。",
+            "required_copy": [{"requirement_id": "date", "text": "2026年10月12日"}],
+        },
+    ],
+)
+async def test_public_promotion_analyze_uses_supplied_date_or_optional_date(monkeypatch, changes):
+    import httpx
+
+    from image_agent import analyze_long_image
+
+    request = LongImageRequest.model_validate(
+        {
+            "scene": "promotion",
+            "title": "活动",
+            "content_brief": "必须展示活动日期；使用原文栏提供的日期。",
+        }
+        | changes
+    )
+    posts = []
+
+    def respond(http_request):
+        posts.append(http_request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"status": "ready", "plan": plan_for(request)}, ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw)
+    )
+    result = await analyze_long_image(request, AgentConfig(openrouter_api_key="offline"))
+    assert result.status == "ready"
+    assert result.issues == []
+    assert result.usage == {"vision_calls": 1, "image_calls": 0}
+    assert len(posts) == 1
+    if request.required_copy:
+        assert result.plan.sections[0].text_units[-1].text == "2026年10月12日"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "brief,has_stamp",
+    [
+        ("必须展示活动日期，尚未确定。", True),
+        ("不需要展示开售日期，但必须展示活动日期，待补充。", True),
+        ("活动宣传，需展示活动日期。", False),
+        ("Must display the event date, TBD.", True),
+    ],
+)
+async def test_public_required_unknown_date_has_no_planning_or_image_posts(
+    monkeypatch, brief, has_stamp
+):
+    import httpx
+
+    from image_agent import analyze_long_image, create_long_image
+
+    def forbidden_post(http_request):
+        pytest.fail("missing required date must not submit any HTTP request")
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(forbidden_post), **kw),
+    )
+    request = LongImageRequest(
+        scene="promotion",
+        title="活动",
+        content_brief=brief,
+        required_copy=[{"requirement_id": "stamp", "text": "原样保留：１０月１２日，09:30"}]
+        if has_stamp
+        else [],
+    )
+    planning = await analyze_long_image(request, AgentConfig())
+    result = await create_long_image(request, AgentConfig())
+    assert planning.status == result.status == "needs_input"
+    assert planning.plan is result.plan is None
+    assert planning.issues[0].code == result.issues[0].code == "missing_activity_date"
+    assert planning.usage == result.usage.execution == {"vision_calls": 0, "image_calls": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["corrected", "invalid_model", "direct"])
+async def test_public_create_isolates_global_copy_before_actual_image_payload(monkeypatch, mode):
+    import base64
+
+    import httpx
+
+    from image_agent import create_long_image
+    from tests.test_long_image_pipeline import audit_payload
+    from tests.test_long_image_pipeline import png as slot_png
+
+    request = LongImageRequest(
+        scene="tutorial",
+        title="教程",
+        content_brief="操作指南",
+        required_copy=[{"requirement_id": "date", "text": "10 月 12 日开售"}],
+        image_size="1K",
+    )
+    good = plan_for(request, slots=True)
+    good["visual_direction"] = "黑金风格"
+    for index, section in enumerate(good["sections"][1:], 1):
+        section["text_units"] = [
+            {"unit_id": f"body-{index}", "kind": "body", "text": f"步骤 {index}"}
+        ]
+    bad = good | {"visual_direction": "黑金风格；每张配图写出10 月 12 日开售"}
+    config = AgentConfig.from_mapping(
+        {
+            "services": {
+                "vision": {
+                    "base_url": "https://vision.invalid",
+                    "protocol": "chat_completions",
+                    "api_key": "offline",
+                },
+                "images": {
+                    "base_url": "https://images.invalid",
+                    "protocol": "openai_images",
+                    "api_key": "offline",
+                },
+            },
+            "image_models": {"pro": {"service": "images", "model": "image"}},
+            "stages": {"vision": {"service": "vision", "model": "planner"}},
+        }
+    )
+    plans, image_prompts, vision_posts = [], [], []
+
+    def respond(http_request):
+        payload = json.loads(http_request.content)
+        if http_request.url.host == "images.invalid":
+            image_prompts.append(payload["prompt"])
+            return httpx.Response(
+                200, json={"data": [{"b64_json": base64.b64encode(slot_png()).decode()}]}
+            )
+        vision_posts.append(payload)
+        instruction = payload["messages"][0]["content"][0]["text"]
+        if "Audit ONLY" in instruction:
+            value = audit_payload()
+            value["slot_id"] = "illustration"
+            value["candidate_id"] = re.search(r'"candidate_id": "([^"]+)"', instruction)[1]
+        else:
+            plans.append(payload)
+            value = {
+                "status": "ready",
+                "plan": good if mode == "corrected" and len(plans) == 2 else bad,
+            }
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(value, ensure_ascii=False)}}]}
+        )
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw)
+    )
+    result = await create_long_image(
+        request, config, plan=LongImagePlan(**bad) if mode == "direct" else None
+    )
+    if mode == "corrected":
+        assert result.status == "succeeded"
+        assert len(plans) == 2
+        assert len(image_prompts) == 1
+        assert "黑金风格" in image_prompts[0]
+        assert "10 月 12 日开售" not in image_prompts[0]
+        assert any(c["kind"] == "text_coverage" and c["passed"] for c in result.page_checks)
+        assert any(u.text == "10 月 12 日开售" for s in result.plan.sections for u in s.text_units)
+        assert result.usage.execution == {"vision_calls": 3, "image_calls": 1}
+    else:
+        assert result.status == "failed"
+        assert result.error_info.code == "plan_invalid"
+        assert image_prompts == []
+        assert len(vision_posts) == (0 if mode == "direct" else 2)
+
+
+def test_generic_compiler_rejects_global_visual_direction_copy():
+    from image_agent.long_image_product import compile_long_generic_slot
+
+    request = LongImageRequest(
+        scene="tutorial",
+        title="教程",
+        content_brief="操作",
+        required_copy=[{"requirement_id": "date", "text": "10 月 12 日开售"}],
+    )
+    plan = LongImagePlan(
+        **(plan_for(request, slots=True) | {"visual_direction": "配图写出10 月 12 日开售"})
+    )
+    with pytest.raises(AgentError) as caught:
+        compile_long_generic_slot(request, plan.image_slots[0], plan, (), AgentConfig())
+    assert caught.value.code == "plan_invalid"
 
 
 @pytest.mark.asyncio

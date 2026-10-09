@@ -218,6 +218,31 @@ async def test_exact_copy_does_not_enter_slot_must_show_but_native_label_does():
 
 
 @pytest.mark.asyncio
+async def test_product_global_direction_preserves_native_label_with_same_page_copy():
+    from image_agent.long_image_product import compile_long_product_slot, prepare_long_product
+    from image_agent.long_image_vision import validate_slot_copy_isolation
+
+    request, materials = inputs(
+        "商品介绍", required_copy=[{"requirement_id": "label", "text": "ACME"}]
+    )
+    discovery = analysis_data()
+    discovery["facts"][0].update(
+        description="杯上原生印字 ACME",
+        evidence=[dict(material_id="m1", observation="印字 ACME", source_type="product_label")],
+    )
+    product = await prepare_long_product(
+        request, materials, analysis=None, vision=FakeVision(discovery=discovery)
+    )
+    plan = product_plan(request, materials, product)
+    plan.visual_direction = "自然光；保留杯上原生印字 ACME"
+    validate_slot_copy_isolation(plan, product.analysis)
+    compiled = compile_long_product_slot(request, plan.image_slots[0], plan, product)
+    assert "自然光" in compiled.prompt
+    assert "ACME" in compiled.prompt
+    assert any(r.target_id == "f1" for r in compiled.element_plan.requirements)
+
+
+@pytest.mark.asyncio
 async def test_changed_discovery_content_rejects_snapshot_but_layout_does_not():
     from image_agent.long_image_product import prepare_long_product
 
