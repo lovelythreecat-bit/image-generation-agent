@@ -203,6 +203,124 @@ async def test_public_promotion_analyze_uses_supplied_date_or_optional_date(monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("date", ["10/12", "10-12"])
+@pytest.mark.parametrize("source", ["content_brief", "title", "required_copy"])
+@pytest.mark.parametrize("entrypoint", ["analyze", "create"])
+async def test_public_promotion_accepts_yearless_date_without_changing_copy(
+    monkeypatch, date, source, entrypoint
+):
+    import httpx
+
+    from image_agent import analyze_long_image, create_long_image
+
+    request = LongImageRequest(
+        scene="promotion",
+        title=date if source == "title" else "活动",
+        content_brief=f"必须展示活动日期：{date}。"
+        if source == "content_brief"
+        else "必须展示活动日期；使用用户内容中提供的日期。",
+        required_copy=[{"requirement_id": "date", "text": date}]
+        if source == "required_copy"
+        else [],
+    )
+    data = plan_for(request)
+    if source == "content_brief":
+        start = request.content_brief.index(date)
+        data["sections"][0]["text_units"].append(
+            {
+                "unit_id": "activity-date",
+                "kind": "body",
+                "text": date,
+                "source": {"pointer": "/content_brief", "start": start, "end": start + len(date)},
+            }
+        )
+    for index, section in enumerate(data["sections"][1:], 1):
+        section["text_units"] = [{"unit_id": f"body-{index}", "kind": "body", "text": "活动亮点"}]
+    posts = []
+
+    def respond(http_request):
+        posts.append(http_request)
+        assert http_request.url.path.endswith("/chat/completions")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"status": "ready", "plan": data}, ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw)
+    )
+    config = AgentConfig(openrouter_api_key="offline")
+    if entrypoint == "analyze":
+        result = await analyze_long_image(request, config)
+        assert result.status == "ready"
+        usage = result.usage
+    else:
+        result = await create_long_image(request, config)
+        assert result.status == "succeeded"
+        assert date in [u["text"] for u in result.page.layout["text_units"]]
+        usage = result.usage.execution
+    assert result.issues == []
+    assert date in [u.text for section in result.plan.sections for u in section.text_units]
+    assert len(posts) == 1
+    assert usage == {"vision_calls": 1, "image_calls": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "型号 AB10-12X",
+        "型号：10-12",
+        "尺寸10-12cm",
+        "尺寸：10-12 cm",
+        "规格：10/12 mm",
+        "比例1/4",
+        "编号12345-67890",
+        "13/40",
+        "2026-10",
+    ],
+)
+async def test_public_promotion_does_not_use_model_or_size_numbers_as_yearless_dates(
+    monkeypatch, copy
+):
+    import httpx
+
+    from image_agent import analyze_long_image, create_long_image
+
+    def forbidden_post(http_request):
+        pytest.fail("model/size numbers do not provide the required activity date")
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(forbidden_post), **kw),
+    )
+    request = LongImageRequest(
+        scene="promotion",
+        title="活动",
+        content_brief="必须展示活动日期。",
+        required_copy=[{"requirement_id": "other", "text": copy}],
+    )
+    planning = await analyze_long_image(request, AgentConfig())
+    result = await create_long_image(request, AgentConfig())
+    assert planning.status == result.status == "needs_input"
+    assert planning.issues[0].code == result.issues[0].code == "missing_activity_date"
+    assert planning.usage == result.usage.execution == {"vision_calls": 0, "image_calls": 0}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "brief,has_stamp",
     [

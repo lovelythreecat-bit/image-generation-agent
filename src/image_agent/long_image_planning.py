@@ -101,9 +101,30 @@ def missing_input_issues(request):
             *request.service_notes,
         ]
     )
-    if unspecified_date or not re.search(
-        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,4}\s*(?:年|月|日)|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)",
-        content,
+    # MM/DD and MM-DD do not require a year. Match complete plausible month/day
+    # tokens, rather than substrings of model identifiers or dimension ranges.
+    short_date = any(
+        not re.search(
+            r"(?:型号|编号|货号|款号|尺寸|规格|比例|model|size|sku|ratio)\s*[:：]?\s*$",
+            content[: match.start()][-40:],
+            re.I,
+        )
+        and not re.match(
+            r"[ \t]*(?:mm|cm|kg|ml|inch|inches|m|g|l)(?![A-Za-z])|[ \t]*(?:毫米|厘米|千克|公斤|米|克|毫升|升)",
+            content[match.end() :],
+            re.I,
+        )
+        for match in re.finditer(
+            r"(?<![0-9A-Za-z./-])(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12][0-9]|3[01])(?![0-9A-Za-z./-])",
+            content,
+        )
+    )
+    if unspecified_date or not (
+        short_date
+        or re.search(
+            r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,4}\s*(?:年|月|日)|(?:今天|明天|今晚|即日起|长期|随时|每天|每周|每月)",
+            content,
+        )
     ):
         return [
             LongImageIssue(
