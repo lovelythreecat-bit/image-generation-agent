@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError
 from .long_image_models import LongImageRequirement
-from .long_image_requirements import collect_text_requirements, validate_long_image_plan
+from .long_image_requirements import validate_long_image_plan
 from .long_image_store import content_hash
 from .marketing import creative_input
 from .models import (
@@ -327,6 +327,8 @@ def compile_long_generic_slot(request, slot, plan, materials, config=None):
 
 
 def compile_long_product_slot(request, slot, plan, product):
+    from .long_image_vision import validate_slot_copy_isolation
+
     if slot.source != "generate" or product.status != "ready" or product.context is None:
         raise AgentError(
             "only generated slots with ready product evidence can be compiled", code="plan_invalid"
@@ -345,23 +347,16 @@ def compile_long_product_slot(request, slot, plan, product):
         or plan.resolved_selection != product.context.selection
     ):
         raise AgentError("slot product snapshot does not match plan", code="plan_invalid")
+    validate_slot_copy_isolation(plan, analysis=product.analysis)
     requirements = slot_visual_requirements(slot, plan)
-    page_quotes = [
-        r.text for r in collect_text_requirements(request) if r.source.pointer == "/content_brief"
-    ]
     context = product.context.model_copy(deep=True)
     selection = context.selection
-    selection.constraints = [
-        c
-        for c in selection.constraints
-        if not (
-            c.source == "brief"
-            and (
-                c.kind == "marketing_claim"
-                or any(c.source_quote in q or q in c.source_quote for q in page_quotes)
-            )
-        )
-    ]
+    # The long plan allocates creative requirements to individual slots. Discovery
+    # constraints describe the whole brief and cannot remain per-slot obligations.
+    # Keep selected subjects/elements and their physical evidence; shared styling
+    # is supplied by visual_direction below, while audit IDs/priorities come from
+    # this slot's allocated requirements.
+    selection.constraints = []
     # Program-rendered copy never becomes a visual requirement. Native labels remain
     # visible facts and selected elements in the original evidence snapshot.
     for requirement in requirements:
