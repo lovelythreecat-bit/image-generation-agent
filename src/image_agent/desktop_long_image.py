@@ -1,8 +1,8 @@
-"""Native Chinese long-image workspace, sharing the app's single worker."""
+"""Native Chinese long-image workspace with one task worker and a bounded preview decoder."""
 
-import hashlib
 import io
 import math
+import threading
 import tkinter as tk
 from collections import OrderedDict
 from pathlib import Path
@@ -33,6 +33,111 @@ THEMES = {"自动": "auto", "简洁": "clean", "温暖": "warm", "质感": "prem
 VIEWS = ("整张长图", "语义段落", "切片", "原始配图")
 
 
+class _PreviewWorker:
+    """One decoded source and one latest request; never calls Tk."""
+
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.request = None
+        self.result = None
+        self.version = 0
+        self.closed = False
+        self.thread = None
+
+    def _discard_result(self):
+        if self.result and self.result[2] is not None:
+            self.result[2].close()
+        self.result = None
+
+    def invalidate(self):
+        with self.condition:
+            self.version += 1
+            self.request = None
+            self._discard_result()
+            self.condition.notify()
+
+    def submit(self, token, key, data, scale):
+        with self.condition:
+            if self.closed:
+                return
+            self.version += 1
+            self._discard_result()
+            self.request = (token, key, data, scale)
+            if self.thread is None:
+                self.thread = threading.Thread(
+                    target=self._run, name="long-image-preview", daemon=True
+                )
+                self.thread.start()
+            self.condition.notify()
+
+    def take(self):
+        with self.condition:
+            result, self.result = self.result, None
+            return result
+
+    def close(self):
+        with self.condition:
+            self.closed = True
+            self.request = None
+            self._discard_result()
+            self.condition.notify()
+
+    def _run(self):
+        source = None
+        source_data = None
+        try:
+            while True:
+                with self.condition:
+                    while self.request is None and not self.closed:
+                        if source is not None:
+                            source.close()
+                            source = None
+                            source_data = None
+                        self.condition.wait()
+                    if self.closed:
+                        return
+                    token, key, data, scale = self.request
+                    version = self.version
+                    self.request = None
+                resized = None
+                error = None
+                try:
+                    if source_data is not data:
+                        if source is not None:
+                            source.close()
+                        source = Image.open(io.BytesIO(data))
+                        source.load()
+                        source_data = data
+                    data = None
+                    with self.condition:
+                        if self.closed or version != self.version:
+                            continue
+                    width = key[1][0]
+                    top, bottom = key[2:]
+                    source_top = math.floor(top / scale)
+                    source_bottom = min(source.height, math.ceil(bottom / scale))
+                    with source.crop((0, source_top, source.width, source_bottom)) as cropped:
+                        resized = cropped.resize((width, bottom - top), Image.Resampling.LANCZOS)
+                except Exception as failure:
+                    error = str(failure)
+                    if source is not None:
+                        source.close()
+                        source = None
+                        source_data = None
+                data = None
+                with self.condition:
+                    if not self.closed and version == self.version:
+                        self.result = (token, key, resized, error)
+                        # Retain the sole decoded source between viewport requests.
+                        while self.request is None and version == self.version and not self.closed:
+                            self.condition.wait()
+                    elif resized is not None:
+                        resized.close()
+        finally:
+            if source is not None:
+                source.close()
+
+
 class LongImagePanel:
     def __init__(self, app):
         self.app = app
@@ -50,9 +155,13 @@ class LongImagePanel:
         self.photo = None
         self.preview_size = None
         self.preview_data = None
-        self.preview_digest = None
+        self._preview_source_id = None
         self.preview_scale = 1
         self.drawing = False
+        self._preview_worker = _PreviewWorker()
+        self._preview_epoch = 0
+        self._preview_requested_key = None
+        self._preview_timer = None
         self.scene = tk.StringVar(value="步骤教程")
         self.theme = tk.StringVar(value="自动")
         self.view = tk.StringVar(value=VIEWS[0])
@@ -285,6 +394,7 @@ class LongImagePanel:
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
         self.preview_canvas.bind("<Configure>", self._preview_resize)
+        self.preview_canvas.bind("<Destroy>", self._preview_destroyed)
         self.preview_canvas.bind("<MouseWheel>", self._wheel)
         self.preview_canvas.bind("<Button-1>", lambda e: self.preview_canvas.focus_set())
         for key, direction, unit in (
@@ -638,11 +748,7 @@ class LongImagePanel:
         self.result = None
         self.items = []
         self.candidates = []
-        self.thumbnail_cache.clear()
-        self.photo = None
-        self.preview_data = None
-        self.preview_size = None
-        self.preview_canvas.delete("all")
+        self._clear_preview()
         self.candidate_choice.set("")
         self.candidate_choice.configure(values=())
         self.accept_reason.set("")
@@ -750,6 +856,7 @@ class LongImagePanel:
         self.update_actions()
 
     def refresh_preview(self, _event=None):
+        self._clear_preview()
         if self.result is None:
             return
         item_index = self.item_choice.current()
@@ -800,8 +907,6 @@ class LongImagePanel:
                 )
                 data = bundle.blobs.get(candidate_dto.blob_id) if candidate_dto.blob_id else None
             if not data:
-                self.photo = None
-                self.preview_data = None
                 self.preview_canvas.delete("all")
                 self.preview_canvas.create_text(
                     16,
@@ -822,7 +927,9 @@ class LongImagePanel:
                 size = (max(1, round(width * scale)), max(1, round(height * scale)))
             self.preview_size = size
             self.preview_data = data
-            self.preview_digest = hashlib.sha256(data).hexdigest()
+            # Immutable bytes identity is enough for this transient, selection-scoped
+            # cache. The worker retains the original bytes while reusing their decode.
+            self._preview_source_id = id(data)
             self.preview_scale = scale
             self.preview_canvas.configure(scrollregion=(0, 0, size[0] + 16, size[1] + 16))
             self._draw_visible_preview()
@@ -830,9 +937,58 @@ class LongImagePanel:
             self.notice.configure(
                 text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
             )
-            self.preview_data = self.preview_size = self.photo = None
-            self.thumbnail_cache.clear()
-            self.preview_canvas.delete("all")
+            self._clear_preview()
+
+    def _clear_preview(self):
+        self._preview_epoch += 1
+        self._preview_requested_key = None
+        self._preview_worker.invalidate()
+        if self._preview_timer is not None:
+            self.app.root.after_cancel(self._preview_timer)
+            self._preview_timer = None
+        self.preview_data = self.preview_size = self._preview_source_id = self.photo = None
+        self.thumbnail_cache.clear()
+        self.preview_canvas.delete("all")
+
+    def _preview_destroyed(self, _event=None):
+        self._preview_epoch += 1
+        self._preview_worker.close()
+        if self._preview_timer is not None:
+            self.app.root.after_cancel(self._preview_timer)
+            self._preview_timer = None
+        self.thumbnail_cache.clear()
+        self.photo = None
+
+    def _poll_preview(self):
+        self._preview_timer = None
+        result = self._preview_worker.take()
+        if result is not None:
+            token, key, resized, error = result
+            try:
+                if token == self._preview_epoch and key == self._preview_requested_key:
+                    self._preview_requested_key = None
+                    if error is not None:
+                        self.notice.configure(
+                            text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
+                        )
+                        self._clear_preview()
+                    else:
+                        self.thumbnail_cache[key] = ImageTk.PhotoImage(
+                            resized, master=self.app.root
+                        )
+                        while len(self.thumbnail_cache) > 4:
+                            self.thumbnail_cache.popitem(last=False)
+                        self._draw_visible_preview()
+            except Exception as error:
+                self.notice.configure(
+                    text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
+                )
+                self._clear_preview()
+            finally:
+                if resized is not None:
+                    resized.close()
+        if self._preview_requested_key is not None:
+            self._preview_timer = self.app.root.after(20, self._poll_preview)
 
     def _preview_scrolled(self, start, end):
         self.preview_scrollbar.set(start, end)
@@ -851,18 +1007,20 @@ class LongImagePanel:
             bottom = min(height, top + max(512, canvas.winfo_height()) + 512)
             if bottom <= top:
                 return
-            key = (self.preview_digest, self.preview_size, top, bottom)
+            key = (self._preview_source_id, self.preview_size, top, bottom)
             if key not in self.thumbnail_cache:
-                with Image.open(io.BytesIO(self.preview_data)) as original:
-                    source_top = math.floor(top / self.preview_scale)
-                    source_bottom = min(original.height, math.ceil(bottom / self.preview_scale))
-                    cropped = original.crop((0, source_top, original.width, source_bottom))
-                    resized = cropped.resize((width, bottom - top), Image.Resampling.LANCZOS)
-                    self.thumbnail_cache[key] = ImageTk.PhotoImage(resized, master=self.app.root)
-                    resized.close()
-                    cropped.close()
-                while len(self.thumbnail_cache) > 4:
-                    self.thumbnail_cache.popitem(last=False)
+                if key != self._preview_requested_key:
+                    self._preview_requested_key = key
+                    self._preview_worker.submit(
+                        self._preview_epoch, key, self.preview_data, self.preview_scale
+                    )
+                if self._preview_timer is None:
+                    self._preview_timer = self.app.root.after(20, self._poll_preview)
+                return
+            # A cache hit also invalidates a pending strip for a viewport we left.
+            if self._preview_requested_key is not None:
+                self._preview_requested_key = None
+                self._preview_worker.invalidate()
             self.photo = self.thumbnail_cache[key]
             self.thumbnail_cache.move_to_end(key)
             canvas.delete("all")

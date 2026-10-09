@@ -1,11 +1,13 @@
 import asyncio
 import gc
+import hashlib
 import io
+import threading
 import time
 import tkinter as tk
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageFile
 
 from image_agent.desktop import DesktopApp
 from image_agent.long_image_models import (
@@ -37,7 +39,12 @@ def app(tk_root, tmp_path):
     window.job.cancel()
     if window.job.thread:
         window.job.thread.join(3)
-    window.close()
+    if root.winfo_exists():
+        window.close()
+    worker = window.long_panel._preview_worker.thread
+    if worker:
+        worker.join(3)
+        assert not worker.is_alive()
     del window
     gc.collect()
 
@@ -72,6 +79,368 @@ def preview_result(tmp_path, status="pending_audit"):
             image=data.getvalue(),
         ),
     )
+
+
+def wait_preview(panel):
+    deadline = time.monotonic() + 8
+    while panel.photo is None and time.monotonic() < deadline:
+        panel.app.root.update()
+        time.sleep(0.01)
+    assert panel.photo is not None, panel.notice.cget("text")
+
+
+def test_preview_decodes_source_off_tk_thread(app, tmp_path, monkeypatch):
+    """Moving source decode back into a Tk draw callback must fail this test."""
+    threads = []
+    original_load = Image.Image.load
+
+    def tracked_load(image, *args, **kwargs):
+        if image.size == (750, 6000):
+            threads.append(threading.get_ident())
+        return original_load(image, *args, **kwargs)
+
+    result = preview_result(tmp_path)
+    monkeypatch.setattr(Image.Image, "load", tracked_load)
+    panel = app.long_panel
+    panel.show_result(result)
+    assert threading.get_ident() not in threads
+    wait_preview(panel)
+    assert threads and threading.get_ident() not in threads
+    assert panel.photo.width() == panel.preview_size[0]
+
+
+def block_first_preview_decode(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original_load = ImageFile.ImageFile.load
+
+    def gated_load(image, *args, **kwargs):
+        if image.size == (750, 6000) and not entered.is_set():
+            entered.set()
+            assert release.wait(5), "test did not release source decode"
+        return original_load(image, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFile.ImageFile, "load", gated_load)
+    return entered, release
+
+
+@pytest.mark.parametrize("switch", ["result", "candidate", "zoom", "invalid", "clear"])
+def test_late_preview_is_rejected_after_switch(app, tmp_path, monkeypatch, switch):
+    """Old in-flight pixels cannot overwrite the newly selected image or scale."""
+    result = preview_result(tmp_path)
+    if switch == "candidate":
+        output = io.BytesIO()
+        Image.new("RGB", (750, 6000), "blue").save(output, format="PNG")
+        payloads = {"first": result.page.image, "second": output.getvalue()}
+        asset = LongSlotAsset(
+            slot_id="generated",
+            source="generate",
+            status="pending_audit",
+            selected_candidate_id="first",
+            candidates=[
+                {
+                    "candidate_id": key,
+                    "status": "pending_audit",
+                    "file_path": key + ".png",
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+                for key, data in payloads.items()
+            ],
+        )
+        asset._candidate_payloads = {
+            key: (key + ".png", hashlib.sha256(data).hexdigest(), data)
+            for key, data in payloads.items()
+        }
+        result.image_assets = [asset]
+        app.long_panel.view.set("原始配图")
+    entered, release = block_first_preview_decode(monkeypatch)
+    panel = app.long_panel
+    try:
+        panel.show_result(result)
+        assert entered.wait(2)
+        if switch == "result":
+            output = io.BytesIO()
+            Image.new("RGB", (750, 6000), "blue").save(output, format="PNG")
+            changed = preview_result(tmp_path)
+            changed.page.image = output.getvalue()
+            panel.show_result(changed)
+        elif switch == "zoom":
+            panel.zoom.set("150%")
+            panel.refresh_preview()
+        elif switch == "candidate":
+            panel.candidate_choice.current(1)
+            panel.refresh_preview()
+        elif switch == "invalid":
+            changed = preview_result(tmp_path)
+            changed.page.image = b"invalid png"
+            panel.show_result(changed)
+        else:
+            panel.clear_binding()
+        release.set()
+        if switch in ("result", "candidate", "zoom"):
+            wait_preview(panel)
+            assert panel.photo.width() == (1125 if switch == "zoom" else panel.preview_size[0])
+            expected = (0, 0, 255) if switch in ("result", "candidate") else (255, 255, 255)
+            assert panel.photo._PhotoImage__photo.get(0, 0) == expected
+        else:
+            # Let the actual worker finish before pumping all pending Tk callbacks.
+            panel._preview_worker.close()
+            panel._preview_worker.thread.join(3)
+            app.root.update()
+            assert panel.preview_data is None and panel.photo is None
+            assert not panel.preview_canvas.find_all()
+    finally:
+        release.set()
+
+
+def test_closing_window_settles_preview_without_tk_worker_calls(app, tmp_path, monkeypatch):
+    entered, release = block_first_preview_decode(monkeypatch)
+    panel = app.long_panel
+    try:
+        panel.show_result(preview_result(tmp_path))
+        assert entered.wait(2)
+        thread = panel._preview_worker.thread
+        app.close()
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        assert panel._preview_worker.take() is None
+        assert panel.photo is None and not panel.thumbnail_cache
+        assert not app.job.running
+    finally:
+        release.set()
+
+
+class PreviewViewport:
+    """Deterministic viewport, while the production path still uploads into real Tk."""
+
+    def __init__(self, canvas=None):
+        self.canvas = canvas
+        self.offset = 0
+        self.images = []
+
+    def canvasy(self, value):
+        return self.offset + value
+
+    def winfo_height(self):
+        return 720
+
+    def delete(self, *_args):
+        self.images.clear()
+
+    def create_image(self, x, y, **options):
+        self.images.append((x, y, options["image"]))
+
+    def configure(self, **options):
+        self.canvas.configure(**options)
+
+    def winfo_width(self):
+        return self.canvas.winfo_width()
+
+    def yview_moveto(self, position):
+        self.offset = position * 16000
+
+
+def wait_strip(panel):
+    deadline = time.monotonic() + 8
+    while panel._preview_requested_key is not None and time.monotonic() < deadline:
+        panel.app.root.update()
+        time.sleep(0.005)
+    assert panel._preview_requested_key is None
+    assert panel.photo is not None
+
+
+def test_scroll_coalesces_and_reuses_one_decoded_source(app, tmp_path, monkeypatch):
+    """Per-scroll decode, an accumulating queue, or worker Tk uploads are regressions."""
+    result = preview_result(tmp_path)
+    entered, release = block_first_preview_decode(monkeypatch)
+    panel = app.long_panel
+    real_canvas = panel.preview_canvas
+    viewport = PreviewViewport(real_canvas)
+    loads, resizes, uploads = [], [], []
+    original_open = Image.open
+    original_resize = Image.Image.resize
+    from image_agent.desktop_long_image import ImageTk
+
+    original_photo = ImageTk.PhotoImage
+
+    def tracked_open(*args, **kwargs):
+        image = original_open(*args, **kwargs)
+        if threading.get_ident() != threading.main_thread().ident:
+            loads.append(image)
+        return image
+
+    def tracked_resize(image, *args, **kwargs):
+        resizes.append(threading.get_ident())
+        return original_resize(image, *args, **kwargs)
+
+    def tracked_photo(*args, **kwargs):
+        uploads.append(threading.get_ident())
+        return original_photo(*args, **kwargs)
+
+    monkeypatch.setattr(Image, "open", tracked_open)
+    monkeypatch.setattr(Image.Image, "resize", tracked_resize)
+    monkeypatch.setattr(ImageTk, "PhotoImage", tracked_photo)
+    try:
+        panel.show_result(result)
+        assert entered.wait(2)
+        thread = panel._preview_worker.thread
+        panel.preview_canvas = viewport
+        for offset in (1024, 2048, 3072, 4096):
+            viewport.offset = offset
+            panel._draw_visible_preview()
+        release.set()
+        wait_strip(panel)
+        assert viewport.images[0][:2] == (8, 3592)
+        assert 1 <= len(resizes) <= 2  # First in flight + only the last queued viewport.
+        assert len(loads) == 1
+        for offset in (0, 1024, 2048, 3072, 4096):
+            viewport.offset = offset
+            panel._draw_visible_preview()
+            wait_strip(panel)
+            assert len(panel.thumbnail_cache) <= 4
+        assert panel._preview_worker.thread is thread
+        assert len(loads) == 1
+        assert resizes and threading.get_ident() not in resizes
+        assert uploads and set(uploads) == {threading.get_ident()}
+        assert not app.job.running and not app.busy
+    finally:
+        release.set()
+        panel.preview_canvas = real_canvas
+
+
+def test_corrupt_png_decode_clears_previous_pixels(app, tmp_path):
+    panel = app.long_panel
+    panel.show_result(preview_result(tmp_path))
+    wait_preview(panel)
+    broken = preview_result(tmp_path)
+    broken.page.image = broken.page.image[:60]  # Valid header, failed worker decode.
+    panel.show_result(broken)
+    deadline = time.monotonic() + 5
+    while panel.preview_data is not None and time.monotonic() < deadline:
+        app.root.update()
+        time.sleep(0.01)
+    panel.preview_canvas.yview_moveto(0.5)
+    app.root.update()
+    assert panel.preview_data is None and panel.preview_size is None and panel.photo is None
+    assert not panel.thumbnail_cache and not panel.preview_canvas.find_all()
+    assert "truncated" in panel.notice.cget("text")
+
+
+@pytest.mark.parametrize(
+    "zoom,offset,expected_size,expected_position",
+    [("50%", 1024, (375, 3000), (8, 520)), ("150%", 3072, (1125, 9000), (8, 2568))],
+)
+def test_preview_strips_keep_scaled_source_pixels_and_canvas_coordinates(
+    app, tmp_path, zoom, offset, expected_size, expected_position
+):
+    output = io.BytesIO()
+    with Image.new("RGB", (750, 6000), "red") as source:
+        source.paste("blue", (0, 2048, 750, 4096))
+        source.paste("green", (0, 4096, 750, 6000))
+        source.save(output, format="PNG")
+    result = preview_result(tmp_path)
+    result.page.image = output.getvalue()
+    panel = app.long_panel
+    real_canvas = panel.preview_canvas
+    viewport = PreviewViewport(real_canvas)
+    panel.preview_canvas = viewport
+    panel.zoom.set(zoom)
+    try:
+        panel.show_result(result)
+        viewport.offset = offset
+        panel._draw_visible_preview()
+        wait_strip(panel)
+        assert panel.preview_size == expected_size
+        assert viewport.images[0][:2] == expected_position
+        assert panel.photo.width() == expected_size[0]
+        assert panel.photo._PhotoImage__photo.get(0, 0) == (255, 0, 0)
+        assert panel.photo._PhotoImage__photo.get(50, 600) == (0, 0, 255)
+    finally:
+        panel.preview_canvas = real_canvas
+
+
+def test_supported_limit_preview_requests_return_without_decode(app, tmp_path, monkeypatch):
+    """Equivalent hidden-Tk pressure probe: CPU work remains, synchronous decode must not."""
+    output = io.BytesIO()
+    with Image.effect_noise((2400, 16000), 70) as noise:
+        with noise.convert("RGB") as source:
+            source.save(output, format="PNG")
+    result = LongImageResult(
+        status="succeeded",
+        run_dir=str(tmp_path),
+        page=LongImageArtifact(
+            artifact_id="page",
+            kind="page",
+            status="succeeded",
+            availability="current",
+            width=2400,
+            height=16000,
+            image=output.getvalue(),
+        ),
+    )
+    loads, resizes = [], []
+    original_load = ImageFile.ImageFile.load
+    original_resize = Image.Image.resize
+
+    def tracked_load(image, *args, **kwargs):
+        if image.size == (2400, 16000):
+            loads.append(threading.get_ident())
+        return original_load(image, *args, **kwargs)
+
+    def tracked_resize(image, *args, **kwargs):
+        resizes.append(threading.get_ident())
+        return original_resize(image, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFile.ImageFile, "load", tracked_load)
+    monkeypatch.setattr(Image.Image, "resize", tracked_resize)
+    panel = app.long_panel
+    real_canvas = panel.preview_canvas
+    viewport = PreviewViewport(real_canvas)
+    panel.preview_canvas = viewport
+    panel.zoom.set("100%")
+    timings = []
+    try:
+        started = time.perf_counter()
+        panel.show_result(result)
+        request_ms = (time.perf_counter() - started) * 1000
+        wait_strip(panel)
+        timings.append(
+            {
+                "offset": 0,
+                "request_ms": round(request_ms, 2),
+                "complete_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
+        )
+        for offset in (2048, 4096, 8192, 12288, 2048):
+            viewport.offset = offset
+            started = time.perf_counter()
+            panel._draw_visible_preview()
+            request_ms = (time.perf_counter() - started) * 1000
+            wait_strip(panel)
+            timings.append(
+                {
+                    "offset": offset,
+                    "request_ms": round(request_ms, 2),
+                    "complete_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+            assert len(panel.thumbnail_cache) <= 4
+        print(
+            {
+                "supported_size": [2400, 16000],
+                "png_bytes": len(result.page.image),
+                "actual_tk_photo_upload": True,
+                "timings": timings,
+            }
+        )
+        assert loads and threading.get_ident() not in loads
+        assert resizes and threading.get_ident() not in resizes
+        assert max(timing["request_ms"] for timing in timings) < 200
+        assert panel.preview_size == (2400, 16000)
+        assert viewport.images[0][:2] == (8, 1544)
+        assert panel.photo.width() == 2400
+    finally:
+        panel.preview_canvas = real_canvas
 
 
 def test_modes_preserve_fields_but_clear_stale_plan(app, tmp_path):
