@@ -14,6 +14,169 @@ from image_agent.long_image_requirements import collect_text_requirements, plann
 from image_agent.long_image_store import LongImageRunStore
 
 
+def visual_gap_inputs():
+    from image_agent.models import LoadedMaterial
+
+    request = LongImageRequest(
+        scene="brand_intro",
+        title="品牌介绍",
+        content_brief="介绍品牌，排版和视觉风格由设计决定",
+        materials=[{"material_id": "m1", "source": {"data": png()}}],
+    )
+    materials = (
+        LoadedMaterial(material_id="m1", data=png(), sha256="hash", order=0, role_hint="auto"),
+    )
+    plan = plan_for(request)
+    plan["input_fingerprint"] = planning_fingerprint(request, {"m1": "hash"})
+    plan["visual_direction"] = "浅灰背景、清晰层级与留白布局"
+    return request, materials, {"status": "ready", "plan": plan}
+
+
+@pytest.mark.parametrize(
+    "code,field",
+    [
+        ("missing_style", "style_hint"),
+        ("missing_layout", "layout"),
+        ("missing_composition", "composition"),
+        ("missing_lighting", "visual_direction"),
+        ("missing_scene", None),
+    ],
+)
+async def test_visual_planning_gap_is_completed_from_same_images_and_raw_draft(code, field):
+    from image_agent.long_image_vision import LongImageVisionClient
+
+    request, materials, ready = visual_gap_inputs()
+    draft = {
+        "status": "needs_input",
+        "plan": None,
+        "issues": [
+            {
+                "issue_id": "visual",
+                "code": code,
+                "field": field,
+                "message": "Choose optional visual direction",
+            }
+        ],
+    }
+    transport = Transport([draft, ready])
+    result = await LongImageVisionClient(transport, AgentConfig()).plan(
+        request, materials, collect_text_requirements(request)
+    )
+    assert (
+        result.status == "ready" and result.plan.visual_direction == "浅灰背景、清晰层级与留白布局"
+    )
+    assert len(transport.payloads) == 2
+    first, second = [payload["messages"][0]["content"] for payload in transport.payloads]
+    assert first[1:] == second[1:]
+    assert json.dumps(draft, ensure_ascii=False) in second[0]["text"]
+    assert result.plan.sections[0].text_units[0].text == request.title
+
+
+@pytest.mark.parametrize(
+    "issue",
+    [
+        {"code": "missing_activity_date", "field": "content_brief"},
+        {"code": "missing_price", "field": "product_specs"},
+        {"code": "missing_number", "field": "required_copy"},
+        {"code": "missing_product_specs", "field": "product_specs"},
+        {"code": "missing_style", "field": "product_specs"},
+        {"code": "missing_style", "field": "style_hint", "resolution": "selection"},
+        {"code": "missing_scene", "field": "visual_direction", "material_ids": ["m1"]},
+        {"code": "missing_lighting", "field": "lighting", "element_ids": ["physical"]},
+    ],
+)
+async def test_visual_gap_mixed_with_real_information_blocker_stays_needs_input(issue):
+    from image_agent.long_image_vision import LongImageVisionClient
+
+    request, materials, ready = visual_gap_inputs()
+    draft = {
+        "status": "needs_input",
+        "issues": [
+            {
+                "issue_id": "style",
+                "code": "missing_style",
+                "field": "style_hint",
+                "message": "Choose style",
+            },
+            {"issue_id": "real", "message": "Required information remains unknown", **issue},
+        ],
+    }
+    transport = Transport([draft, ready])
+    result = await LongImageVisionClient(transport, AgentConfig()).plan(
+        request, materials, collect_text_requirements(request)
+    )
+    assert result.status == "needs_input" and result.plan is None
+    assert [row.issue_id for row in result.issues] == ["style", "real"]
+    assert len(transport.payloads) == 1
+
+
+async def test_repeated_visual_planning_gap_exhausts_existing_completion_limit():
+    from image_agent.long_image_vision import LongImageVisionClient
+
+    request, materials, _ = visual_gap_inputs()
+    draft = {
+        "status": "needs_input",
+        "issues": [
+            {
+                "issue_id": "style",
+                "code": "missing_style",
+                "field": "style_hint",
+                "message": "Choose style",
+            }
+        ],
+    }
+    transport = Transport([draft] * 5)
+    with pytest.raises(ProviderError, match="attempt=4/4"):
+        await LongImageVisionClient(transport, AgentConfig()).plan(
+            request, materials, collect_text_requirements(request)
+        )
+    assert len(transport.payloads) == 4
+
+
+async def test_visual_gap_does_not_complete_over_existing_source_identity_blocker():
+    from image_agent.long_image_vision import LongImageVisionClient
+    from image_agent.models import MaterialAnalysis
+    from tests.fakes import analysis_data
+    from tests.test_long_image_product import inputs
+
+    request, materials = inputs()
+    source = MaterialAnalysis(
+        **(
+            analysis_data()
+            | {
+                "status": "needs_input",
+                "issues": [
+                    {
+                        "issue_id": "physical",
+                        "code": "missing_evidence",
+                        "resolution": "reanalyze",
+                        "message": "Required appearance remains unverified",
+                        "fact_ids": ["f1"],
+                    }
+                ],
+            }
+        )
+    )
+    draft = {
+        "status": "needs_input",
+        "issues": [
+            {
+                "issue_id": "style",
+                "code": "missing_style",
+                "field": "style_hint",
+                "message": "Choose style",
+            }
+        ],
+    }
+    transport = Transport([draft] * 4)
+    result = await LongImageVisionClient(transport, AgentConfig()).plan(
+        request, materials, collect_text_requirements(request), analysis=source
+    )
+    assert result.status == "needs_input" and result.analysis == source
+    assert result.analysis.issues[0].issue_id == "physical"
+    assert len(transport.payloads) == 1
+
+
 def png():
     out = io.BytesIO()
     Image.new("RGB", (64, 64), "white").save(out, "PNG")
@@ -656,7 +819,7 @@ async def test_public_create_isolates_global_copy_before_actual_image_payload(mo
         assert result.status == "failed"
         assert result.error_info.code == "plan_invalid"
         assert image_prompts == []
-        assert len(vision_posts) == (0 if mode == "direct" else 2)
+        assert len(vision_posts) == (0 if mode == "direct" else config.model_completion_attempts)
 
 
 def test_generic_compiler_rejects_global_visual_direction_copy():
@@ -724,7 +887,7 @@ async def test_shared_budget_limits_repeated_planning(tmp_path):
 async def test_default_and_explicit_section_counts(count, brief, want):
     request = LongImageRequest(scene="custom", title="内容", content_brief=brief)
     response = {"status": "ready", "plan": plan_for(request, count=count)}
-    result, _, _, _ = await prepared(request, [response, response])
+    result, _, _, _ = await prepared(request, [response] * AgentConfig().model_completion_attempts)
     assert result.status == want
 
 
@@ -840,7 +1003,9 @@ async def test_page_copy_cannot_leak_into_slot_prompt_or_repair():
     )
     bad_plan = plan_for(request, slots=True)
     bad_plan["image_slots"][0]["prompt"] += "，配图写10 月 12 日开售"
-    result, _, _, _ = await prepared(request, [{"status": "ready", "plan": bad_plan}] * 2)
+    result, _, _, _ = await prepared(
+        request, [{"status": "ready", "plan": bad_plan}] * AgentConfig().model_completion_attempts
+    )
     assert result.status == "failed"
     assert result.error_info.code == "plan_invalid"
     plan = LongImagePlan(**plan_for(request, slots=True))
@@ -1121,7 +1286,9 @@ async def test_explicit_steps_allow_three_sections(brief):
 async def test_three_sections_without_structure_remains_invalid():
     request = LongImageRequest(scene="tutorial", title="教程", content_brief="介绍如何使用")
     result, _, _, _ = await prepared(
-        request, [{"status": "ready", "plan": plan_for(request, count=3)}] * 2
+        request,
+        [{"status": "ready", "plan": plan_for(request, count=3)}]
+        * AgentConfig().model_completion_attempts,
     )
     assert result.status == "failed"
     assert result.error_info.code == "plan_invalid"

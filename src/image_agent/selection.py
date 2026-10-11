@@ -6,6 +6,7 @@ import re
 import unicodedata
 
 from .errors import AgentError, ProviderError
+from .marketing import user_brief_sources
 from .models import (
     AssetElementPlan,
     ErrorInfo,
@@ -20,7 +21,7 @@ from .models import (
 )
 from .prompt import is_apparel, strict_catalog
 
-RULE_VERSION = "multi-image-r3-user-marketing"
+RULE_VERSION = "multi-image-r4-original-input-creative-boundary"
 
 # A deliberately small set from the discovery planning policy. This recognizes
 # generic aesthetic requests, not general semantic equivalence or user intent.
@@ -61,13 +62,13 @@ def normalize_discovery_attribution(analysis, request):
 
     def sources(constraint):
         if constraint.source == "brief":
-            return [request.creative_brief or ""]
+            return user_brief_sources(request)
         if constraint.source == "style_hint":
             return [request.style_hint or ""]
         material = materials.get(constraint.source_material_id)
         return [material.subject_hint or "", *material.element_hints] if material else []
 
-    all_sources = [request.creative_brief or "", request.style_hint or ""]
+    all_sources = [*user_brief_sources(request), request.style_hint or ""]
     for material in materials.values():
         all_sources.extend([material.subject_hint or "", *material.element_hints])
     if result.creative_plan:
@@ -146,12 +147,21 @@ def normalize_discovery_attribution(analysis, request):
 
 def analysis_fingerprint(request, materials):
     hints = {m.material_id: m for m in request.normalized_materials()}
+    long_image = getattr(request, "long_image", None)
     data = {
         "rules": RULE_VERSION,
         "product_name": request.product_name,
         "category": request.category,
         "brief": request.creative_brief,
         "style_hint": request.style_hint,
+        "long_image_input": (
+            {
+                "known_info": long_image.known_info,
+                "required_copy": long_image.required_copy,
+            }
+            if long_image is not None
+            else None
+        ),
         "materials": [
             dict(
                 material_id=m.material_id,

@@ -53,6 +53,53 @@
       "title": "MaterialDTO",
       "type": "object"
     },
+    "ProductLongImageOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "default": 750,
+          "maximum": 2400,
+          "minimum": 400,
+          "title": "Width",
+          "type": "integer"
+        },
+        "segment_count": {
+          "default": 6,
+          "maximum": 12,
+          "minimum": 3,
+          "title": "Segment Count",
+          "type": "integer"
+        },
+        "segment_aspect_ratio": {
+          "default": "3:4",
+          "enum": [
+            "3:4",
+            "4:5",
+            "9:16"
+          ],
+          "title": "Segment Aspect Ratio",
+          "type": "string"
+        },
+        "known_info": {
+          "default": "",
+          "maxLength": 12000,
+          "title": "Known Info",
+          "type": "string"
+        },
+        "required_copy": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Required Copy",
+          "type": "array"
+        }
+      },
+      "title": "ProductLongImageOptions",
+      "type": "object"
+    },
     "SelectionSpec": {
       "additionalProperties": false,
       "properties": {
@@ -141,12 +188,24 @@
         "enum": [
           "main_image",
           "detail_page",
-          "pdd_white_background"
+          "pdd_white_background",
+          "long_image"
         ],
         "type": "string"
       },
       "title": "Output Types",
       "type": "array"
+    },
+    "long_image": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProductLongImageOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "materials": {
       "items": {

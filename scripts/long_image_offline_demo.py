@@ -439,6 +439,7 @@ class OfflineProvider:
                     }
                 ],
                 "elements": [],
+                "creative_plan": {"user_requirements": [], "suggestions": []},
                 "intent": {
                     "proposal": {
                         "primary_subject_id": "cup",

@@ -20,6 +20,8 @@ VISION_STAGES = {
     "audit_detail_set",
     "plan_long_image",
     "audit_long_image_asset",
+    "plan_product_long_image",
+    "audit_product_long_image_copy",
 }
 LEGACY_FIELDS = {
     "openrouter_api_key",
@@ -110,6 +112,7 @@ class AgentConfig(Model):
     model_concurrency: int = Field(default=2, gt=0)
     generation_reference_limit: int = Field(default=4, gt=0)
     vision_image_limit: int = Field(default=12, gt=0)
+    model_completion_attempts: int = Field(default=4, ge=1, le=8)
 
     @model_validator(mode="after")
     def defaults(self):

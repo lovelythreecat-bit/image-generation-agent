@@ -7,6 +7,7 @@ from typing import Awaitable, Callable, Protocol
 
 from pydantic import ValidationError
 
+from .completion import completion_problems, maybe_complete_analysis
 from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError, make_error_info
 from .generate import ImageGenerator
@@ -87,8 +88,20 @@ def _failed_analysis(fingerprint, error):
         facts=[],
         elements=[],
         intent=None,
-        error_info=make_error_info(error),
+        error_info=make_error_info(error, stage="analyze_materials"),
     )
+
+
+def _analysis_error(analysis):
+    if analysis.error_info is not None:
+        return analysis.error_info
+    if analysis.status == "failed":
+        return ErrorInfo(
+            code="provider_protocol",
+            kind="protocol",
+            message="analysis failed without error information; reanalyze",
+        )
+    return None
 
 
 async def prepare_analysis(request, config, dependencies, *, loaded_materials=None):
@@ -107,18 +120,24 @@ async def prepare_analysis(request, config, dependencies, *, loaded_materials=No
             )
         analysis = await dependencies.vision.analyze_materials(request, materials)
         analysis = MaterialAnalysis.model_validate(analysis.model_dump())
+        failure = _analysis_error(analysis)
+        if failure is not None:
+            analysis.fingerprint = fingerprint
+            analysis.error_info = failure
+            hashes = {m.material_id: m.sha256 for m in materials}
+            for observed in analysis.materials:
+                if observed.material_id in hashes:
+                    observed.sha256 = hashes[observed.material_id]
+            return PreparedAnalysis(materials=materials, analysis=analysis)
         analysis = normalize_discovery_attribution(analysis, request)
         if [m.material_id for m in analysis.materials] != [m.material_id for m in materials]:
             raise ProviderError("discovery material IDs do not match inputs")
         analysis.fingerprint = fingerprint
         for observed, loaded in zip(analysis.materials, materials):
             observed.sha256 = loaded.sha256
-        if analysis.status == "failed" and analysis.error_info is None:
-            analysis.error_info = ErrorInfo(
-                code="provider_protocol",
-                kind="protocol",
-                message="discovery returned failed without usable evidence",
-            )
+        analysis = await maybe_complete_analysis(
+            request, materials, analysis, dependencies.vision, config
+        )
     except (ProviderError, ValidationError) as error:
         if isinstance(error, ValidationError):
             error = ProviderError("discovery schema invalid")
@@ -135,10 +154,44 @@ def _result(request, **kwargs):
     )
 
 
+async def _selection_evidence(request, prepared, draft, dependencies, config, *, force=False):
+    warnings_only = bool(draft.issue_resolutions) and all(
+        resolution.status == "irrelevant" for resolution in draft.issue_resolutions
+    )
+    if not (
+        draft.candidate
+        and not draft.blocking_issues
+        and (
+            force
+            or draft.pending_issues
+            or (prepared.analysis.status != "ready" and not warnings_only)
+        )
+    ):
+        return None
+    if len(prepared.materials) > config.vision_image_limit:
+        raise ProviderError(
+            "evidence review exceeds vision capacity",
+            kind="capability",
+            code="vision_capacity_exceeded",
+        )
+    evidence = await dependencies.vision.validate_evidence(
+        request, prepared.materials, prepared.analysis, draft
+    )
+    return normalize_audit_checks(
+        evidence,
+        {
+            "subject_id": draft.candidate.subject_ids,
+            "fact_id": selected_fact_ids(prepared.analysis, draft.candidate),
+            "issue_id": [i.issue_id for i in draft.pending_issues],
+        },
+    )
+
+
 async def prepare_context(request, config, *, dependencies, analysis=None, loaded_materials=None):
     if request.selection.mode == "explicit" and analysis is None:
         raise AgentError("explicit selection requires the same analysis snapshot")
     result = _result(request)
+    snapshot_requires_review = False
     if analysis is None:
         prepared = await prepare_analysis(
             request, config, dependencies, loaded_materials=loaded_materials
@@ -152,15 +205,22 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         )
         if analysis.fingerprint != analysis_fingerprint(request, materials):
             raise StaleAnalysisError("analysis does not match current materials, hints or brief")
+        snapshot = analysis
+        try:
+            analysis = await maybe_complete_analysis(
+                request, materials, analysis, dependencies.vision, config
+            )
+        except ProviderError as error:
+            result.analysis = analysis
+            result.error_info = make_error_info(error, stage="analyze_materials")
+            return None, result
+        snapshot_requires_review = snapshot.status != "ready" and analysis is not snapshot
         prepared = PreparedAnalysis(materials=materials, analysis=analysis)
     result.analysis = prepared.analysis
     result.warnings.extend(prepared.analysis.warnings)
-    if prepared.analysis.status == "failed" and prepared.analysis.intent is None:
-        result.error_info = prepared.analysis.error_info or ErrorInfo(
-            code="provider_protocol",
-            kind="protocol",
-            message="analysis has no usable intent; reanalyze",
-        )
+    failure = _analysis_error(prepared.analysis)
+    if failure is not None:
+        result.error_info = failure
         return None, result
     try:
         draft = resolve_selection(request, prepared.analysis)
@@ -169,32 +229,34 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         )
         if warnings_only:
             result.warnings.extend(resolution.reason for resolution in draft.issue_resolutions)
-        evidence = None
-        if (
-            draft.candidate
-            and not draft.blocking_issues
-            and (
-                draft.pending_issues or (prepared.analysis.status != "ready" and not warnings_only)
-            )
-        ):
-            if len(prepared.materials) > config.vision_image_limit:
-                raise ProviderError(
-                    "evidence review exceeds vision capacity",
-                    kind="capability",
-                    code="vision_capacity_exceeded",
-                )
-            evidence = await dependencies.vision.validate_evidence(
-                request, prepared.materials, prepared.analysis, draft
-            )
-            evidence = normalize_audit_checks(
-                evidence,
-                {
-                    "subject_id": draft.candidate.subject_ids,
-                    "fact_id": selected_fact_ids(prepared.analysis, draft.candidate),
-                    "issue_id": [i.issue_id for i in draft.pending_issues],
-                },
-            )
+        evidence = await _selection_evidence(
+            request, prepared, draft, dependencies, config, force=snapshot_requires_review
+        )
         resolution = finalize_selection(draft, evidence)
+        if resolution.status == "needs_input" and evidence is not None and resolution.issues:
+            completed = await maybe_complete_analysis(
+                request,
+                prepared.materials,
+                prepared.analysis,
+                dependencies.vision,
+                config,
+                additional_issues=resolution.issues,
+            )
+            if completed is not prepared.analysis:
+                prepared.analysis = completed
+                result.analysis = completed
+                result.warnings = list(dict.fromkeys(result.warnings + completed.warnings))
+                draft = resolve_selection(request, completed)
+                evidence = await _selection_evidence(
+                    request, prepared, draft, dependencies, config, force=True
+                )
+                resolution = finalize_selection(draft, evidence)
+                if resolution.status == "needs_input" and completion_problems(
+                    request, completed, additional_issues=resolution.issues
+                ):
+                    raise ProviderError(
+                        "evidence review still reports unresolved creative planning gaps"
+                    )
         if resolution.status != "ready":
             result.status = "needs_input" if resolution.status == "needs_input" else "failed"
             result.issues = resolution.issues

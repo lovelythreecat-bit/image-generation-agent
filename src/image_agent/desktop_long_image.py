@@ -20,6 +20,7 @@ from . import (
 from .desktop_runtime import with_credentials
 from .long_image_models import LongImageOptions, LongImageRequest, LongProductContext
 from .models import ImageSource, MaterialInput, SelectionSpec
+from .user_errors import format_user_error
 
 SCENES = {
     "商品详情": "product_detail",
@@ -31,6 +32,131 @@ SCENES = {
 }
 THEMES = {"自动": "auto", "简洁": "clean", "温暖": "warm", "质感": "premium"}
 VIEWS = ("整张长图", "语义段落", "切片", "原始配图")
+
+
+class ProductLongImageControls:
+    """Optional parameters inside the existing product output selection."""
+
+    def __init__(self, app, parent):
+        self.app = app
+        self.frame = ttk.Frame(parent)
+        self.fields = {
+            key: tk.StringVar(value=value)
+            for key, value in {
+                "width": "750",
+                "segment_count": "6",
+                "segment_aspect_ratio": "3:4",
+            }.items()
+        }
+        self.error = tk.StringVar()
+        dimensions = ttk.Frame(self.frame)
+        dimensions.pack(fill="x")
+        self.entries = {}
+        for column, (key, label) in enumerate(
+            (
+                ("width", "宽度（像素）"),
+                ("segment_count", "区段数"),
+                ("segment_aspect_ratio", "区段比例"),
+            )
+        ):
+            dimensions.columnconfigure(column, weight=1, uniform="long-dimensions")
+            field = ttk.Frame(dimensions)
+            field.grid(row=0, column=column, sticky="ew", padx=(0, 8) if column < 2 else 0)
+            ttk.Label(field, text=label, style="Field.TLabel").pack(anchor="w", pady=(0, 3))
+            if key == "segment_aspect_ratio":
+                entry = ttk.Combobox(
+                    field,
+                    textvariable=self.fields[key],
+                    values=("3:4", "4:5", "9:16"),
+                    state="readonly",
+                    width=7,
+                )
+            else:
+                entry = ttk.Entry(field, textvariable=self.fields[key], width=7)
+            entry.pack(fill="x")
+            self.entries[key] = entry
+        ttk.Label(
+            self.frame,
+            text="默认 6 段，750 宽时约 6000 高；按实际画面保存。",
+            style="Muted.TLabel",
+            wraplength=335,
+        ).pack(anchor="w", pady=(4, 6))
+        ttk.Label(self.frame, text="已知商品信息（可选）", style="Field.TLabel").pack(
+            anchor="w", pady=(4, 3)
+        )
+        self.known_info = app._text_area(self.frame, height=3)
+        self.known_info.pack(fill="x")
+        ttk.Label(
+            self.frame,
+            text="必须出现的文案（每行一条，保留原文）",
+            style="Field.TLabel",
+            wraplength=335,
+        ).pack(anchor="w", pady=(8, 3))
+        self.copy_text = app._text_area(self.frame, height=3)
+        self.copy_text.pack(fill="x")
+        for widget in (self.known_info, self.copy_text):
+            widget.bind("<<Modified>>", self._text_changed)
+        app.outputs["long_image"].trace_add("write", app.invalidate_analysis)
+        ttk.Label(self.frame, textvariable=self.error, style="Notice.TLabel", wraplength=335).pack(
+            fill="x", pady=(4, 0)
+        )
+
+    def _text_changed(self, event):
+        if event.widget.edit_modified():
+            event.widget.edit_modified(False)
+            self.app.invalidate_analysis()
+
+    def set_visible(self, selected):
+        if selected:
+            self.frame.pack(fill="x", pady=(8, 4))
+        else:
+            self.frame.pack_forget()
+
+    def options(self):
+        from pydantic import ValidationError
+
+        from .models import ProductLongImageOptions
+
+        self.error.set("")
+        values = {}
+        for key, label, low, high in (
+            ("width", "宽度", 400, 2400),
+            ("segment_count", "区段数", 3, 12),
+        ):
+            try:
+                values[key] = int(self.fields[key].get())
+                if not low <= values[key] <= high:
+                    raise ValueError()
+            except ValueError:
+                message = f"{label}请输入 {low}–{high} 的整数。"
+                self.error.set(message)
+                self.entries[key].focus_set()
+                raise ValueError(message) from None
+        try:
+            return ProductLongImageOptions(
+                **values,
+                segment_aspect_ratio=self.fields["segment_aspect_ratio"].get(),
+                known_info=self.known_info.get("1.0", "end-1c"),
+                required_copy=[
+                    line for line in self.copy_text.get("1.0", "end-1c").split("\n") if line.strip()
+                ],
+            )
+        except ValidationError as error:
+            field = error.errors()[0]["loc"][0]
+            message = {
+                "segment_aspect_ratio": "区段比例请选择 3:4、4:5 或 9:16。",
+                "known_info": "已知商品信息最多 12000 字，请缩短内容。",
+                "required_copy": "文案最多 30 条，每条最多 500 字，请减少或缩短文案。",
+            }.get(field, "长图参数有误，请检查输入。")
+            self.error.set(message)
+            (
+                self.known_info
+                if field == "known_info"
+                else self.copy_text
+                if field == "required_copy"
+                else self.entries[field]
+            ).focus_set()
+            raise ValueError(message) from error
 
 
 class _PreviewWorker:
@@ -138,7 +264,231 @@ class _PreviewWorker:
                 source.close()
 
 
-class LongImagePanel:
+class _ScrollablePreview:
+    """Viewport strips shared by product and historical long-image previews."""
+
+    def _clear_preview(self):
+        self._preview_epoch += 1
+        self._preview_requested_key = None
+        self._preview_worker.invalidate()
+        if self._preview_timer is not None:
+            self.app.root.after_cancel(self._preview_timer)
+            self._preview_timer = None
+        self.preview_data = self.preview_size = self._preview_source_id = self.photo = None
+        self.thumbnail_cache.clear()
+        self.preview_canvas.delete("all")
+
+    def _preview_destroyed(self, _event=None):
+        self._preview_epoch += 1
+        self._preview_worker.close()
+        if self._preview_timer is not None:
+            self.app.root.after_cancel(self._preview_timer)
+            self._preview_timer = None
+        self.thumbnail_cache.clear()
+        self.photo = None
+
+    def _poll_preview(self):
+        self._preview_timer = None
+        result = self._preview_worker.take()
+        if result is not None:
+            token, key, resized, error = result
+            try:
+                if token == self._preview_epoch and key == self._preview_requested_key:
+                    self._preview_requested_key = None
+                    if error is not None:
+                        self.notice.configure(
+                            text=self.notice.cget("text") + " · "
+                            + self.app.safe_text(format_user_error(error, stage="preview").text)
+                        )
+                        self._clear_preview()
+                    else:
+                        self.thumbnail_cache[key] = ImageTk.PhotoImage(
+                            resized, master=self.app.root
+                        )
+                        while len(self.thumbnail_cache) > 4:
+                            self.thumbnail_cache.popitem(last=False)
+                        self._draw_visible_preview()
+            except Exception as error:
+                self.notice.configure(
+                    text=self.notice.cget("text") + " · "
+                    + self.app.safe_text(format_user_error(error, stage="preview").text)
+                )
+                self._clear_preview()
+            finally:
+                if resized is not None:
+                    resized.close()
+        if self._preview_requested_key is not None:
+            self._preview_timer = self.app.root.after(20, self._poll_preview)
+
+    def _preview_scrolled(self, start, end):
+        self.preview_scrollbar.set(start, end)
+        self._draw_visible_preview()
+
+    def _draw_visible_preview(self):
+        """Cache at most four viewport strips, never resized whole-page copies."""
+        if self.drawing or not self.preview_data or not self.preview_size:
+            return
+        self.drawing = True
+        try:
+            canvas = self.preview_canvas
+            width, height = self.preview_size
+            top = max(0, int(canvas.canvasy(0) - 8))
+            top = (top // 512) * 512
+            bottom = min(height, top + max(512, canvas.winfo_height()) + 512)
+            if bottom <= top:
+                return
+            key = (self._preview_source_id, self.preview_size, top, bottom)
+            if key not in self.thumbnail_cache:
+                if key != self._preview_requested_key:
+                    self._preview_requested_key = key
+                    self._preview_worker.submit(
+                        self._preview_epoch, key, self.preview_data, self.preview_scale
+                    )
+                if self._preview_timer is None:
+                    self._preview_timer = self.app.root.after(20, self._poll_preview)
+                return
+            # A cache hit also invalidates a pending strip for a viewport we left.
+            if self._preview_requested_key is not None:
+                self._preview_requested_key = None
+                self._preview_worker.invalidate()
+            self.photo = self.thumbnail_cache[key]
+            self.thumbnail_cache.move_to_end(key)
+            canvas.delete("all")
+            canvas.create_image(8, top + 8, anchor="nw", image=self.photo)
+        finally:
+            self.drawing = False
+
+    def _preview_resize(self, event):
+        if (
+            self.zoom.get() == "适应宽度"
+            and self.preview_size
+            and abs(event.width - self.preview_size[0] - 16) > 2
+        ):
+            self.refresh_preview()
+        else:
+            self._draw_visible_preview()
+
+    def _wheel(self, event):
+        self._scroll(-int(event.delta / 120), "units")
+        return "break"
+
+    def _scroll(self, direction, unit):
+        self.preview_canvas.yview_scroll(direction, unit)
+        return "break"
+
+    def _edge(self, position):
+        self.preview_canvas.yview_moveto(position)
+        return "break"
+
+
+class ProductLongImagePreview(_ScrollablePreview):
+    """Full product long-image preview in the ordinary result tab."""
+
+    def __init__(self, app, parent):
+        from .desktop import UI_COLORS
+
+        self.app = app
+        self.notice = app.asset_notice
+        self.source_data = None
+        self.thumbnail_cache = OrderedDict()
+        self.photo = self.preview_size = self.preview_data = self._preview_source_id = None
+        self.preview_scale = 1
+        self.drawing = False
+        self._preview_worker = _PreviewWorker()
+        self._preview_epoch = 0
+        self._preview_requested_key = self._preview_timer = None
+        self.zoom = tk.StringVar(value="适应宽度")
+        self.frame = ttk.Frame(parent)
+        self.frame.rowconfigure(1, weight=1)
+        self.frame.columnconfigure(0, weight=1)
+        tools = ttk.Frame(self.frame)
+        tools.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Label(tools, text="长图预览", style="Field.TLabel").pack(side="left")
+        ttk.Label(tools, text="缩放", style="Muted.TLabel").pack(side="left", padx=(16, 6))
+        self.zoom_choice = ttk.Combobox(
+            tools,
+            textvariable=self.zoom,
+            values=("适应宽度", "25%", "50%", "75%", "100%", "150%"),
+            state="readonly",
+            width=10,
+        )
+        self.zoom_choice.pack(side="left")
+        self.zoom_choice.bind("<<ComboboxSelected>>", self.refresh_preview)
+        self.preview_canvas = tk.Canvas(
+            self.frame,
+            background=UI_COLORS["preview"],
+            highlightthickness=1,
+            highlightbackground=UI_COLORS["border"],
+            highlightcolor=UI_COLORS["accent"],
+            takefocus=True,
+        )
+        self.preview_scrollbar = ttk.Scrollbar(self.frame, command=self.preview_canvas.yview)
+        horizontal = ttk.Scrollbar(
+            self.frame, orient="horizontal", command=self.preview_canvas.xview
+        )
+        self.preview_canvas.configure(
+            yscrollcommand=self._preview_scrolled, xscrollcommand=horizontal.set
+        )
+        self.preview_canvas.grid(row=1, column=0, sticky="nsew")
+        self.preview_scrollbar.grid(row=1, column=1, sticky="ns")
+        horizontal.grid(row=2, column=0, sticky="ew")
+        self.preview_canvas.bind("<Configure>", self._preview_resize)
+        self.preview_canvas.bind("<Destroy>", self._preview_destroyed)
+        self.preview_canvas.bind("<MouseWheel>", self._wheel)
+        self.preview_canvas.bind("<Button-1>", lambda e: self.preview_canvas.focus_set())
+        for key, direction, unit in (
+            ("Down", 1, "units"),
+            ("Up", -1, "units"),
+            ("Next", 1, "pages"),
+            ("Prior", -1, "pages"),
+        ):
+            self.preview_canvas.bind(f"<{key}>", lambda e, d=direction, u=unit: self._scroll(d, u))
+        self.preview_canvas.bind("<Home>", lambda e: self._edge(0))
+        self.preview_canvas.bind("<End>", lambda e: self._edge(1))
+
+    def set_source(self, data):
+        self.source_data = data
+        self.preview_canvas.yview_moveto(0)
+        self.preview_canvas.xview_moveto(0)
+        self.refresh_preview()
+
+    def clear(self):
+        self.source_data = None
+        self._clear_preview()
+
+    def refresh_preview(self, _event=None):
+        self._clear_preview()
+        if not self.source_data:
+            return
+        try:
+            # Read only the header on Tk; the shared worker decodes full pixels.
+            with Image.open(io.BytesIO(self.source_data)) as image:
+                width, height = image.size
+                if width > 2400 or height > 60000 or width * height > 60000000:
+                    raise ValueError("长图尺寸超出预览上限，请查看任务目录。")
+            scale = (
+                max(1, self.preview_canvas.winfo_width() - 16) / width
+                if self.zoom.get() == "适应宽度"
+                else int(self.zoom.get().rstrip("%")) / 100
+            )
+            self.preview_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            self.preview_data = self.source_data
+            self._preview_source_id = id(self.source_data)
+            self.preview_scale = scale
+            self.preview_canvas.configure(
+                scrollregion=(0, 0, self.preview_size[0] + 16, self.preview_size[1] + 16)
+            )
+            self._draw_visible_preview()
+        except Exception as error:
+            self.notice.configure(
+                text=self.notice.cget("text") + " · "
+                + self.app.safe_text(format_user_error(error, stage="preview").text)
+            )
+            self.source_data = None
+            self._clear_preview()
+
+
+class LongImagePanel(_ScrollablePreview):
     def __init__(self, app):
         self.app = app
         self.materials = []
@@ -655,7 +1005,7 @@ class LongImagePanel:
         except Exception as error:
             self.field_error.set(app.safe_text(str(error)))
             app.show_error(error)
-            app.status.set(app.safe_text(str(error)))
+            app.status.set(app.safe_text(format_user_error(error).text))
 
     def show_planning(self, result):
         self.planning = result
@@ -675,6 +1025,8 @@ class LongImagePanel:
         self.choice.configure(values=labels)
         self.choice.current(0)
         lines = [f"规划状态：{self._status(result.status)}", f"规划记录：{result.planning_id}"]
+        if result.error_info:
+            lines.append(format_user_error(result, stage="plan").text)
         for issue in result.issues:
             lines.append(
                 f"问题：{issue.message}" + (f" · 字段 {issue.field}" if issue.field else "")
@@ -728,7 +1080,10 @@ class LongImagePanel:
         self.app._text(self.app.json_text, self.app.to_json(result))
         self.app.notebook.select(self.planning_tab)
         self.field_error.set("；".join(i.message for i in result.issues))
-        self.app.status.set(f"规划完成 · {self._status(result.status)}")
+        self.app.status.set(
+            format_user_error(result, stage="plan").text if result.error_info
+            else f"规划完成 · {self._status(result.status)}"
+        )
         self.update_actions()
 
     @staticmethod
@@ -766,6 +1121,7 @@ class LongImagePanel:
         self.app.notebook.select(self.preview_tab)
         self.app.status.set(
             f"长图 · {self._status(result.status)} · 当前任务 {self._usage(result.usage.execution)} · 去重总计 {self._usage(result.usage.display_total)}"
+            + (" · " + format_user_error(result).text if result.error_info else "")
         )
         self.update_actions()
 
@@ -887,13 +1243,15 @@ class LongImagePanel:
             if acceptance.get("reason"):
                 notices.append(f"接受原因：{acceptance['reason']}")
             if candidate.get("error_info"):
-                notices.append(candidate["error_info"].get("message", "候选存在错误"))
+                notices.append(format_user_error(candidate).text)
         if item and getattr(item, "error_info", None):
-            notices.append(item.error_info.message)
+            notices.append(format_user_error(item).text)
+        if self.result.error_info:
+            notices.append(format_user_error(self.result).text)
         if status not in ("succeeded", "available") or self.result.status != "succeeded":
             notices.append("请核对状态与审核记录；人工接受保留自动审核历史。")
         notices.extend(self.result.warnings)
-        notices.extend(e.message for e in self.result.output_errors)
+        notices.extend(format_user_error(e, stage="output").text for e in self.result.output_errors)
         self.notice.configure(text=self.app.safe_text(" · ".join(notices)))
         data = getattr(item, "image", None)
         try:
@@ -912,7 +1270,7 @@ class LongImagePanel:
                     16,
                     16,
                     anchor="nw",
-                    text="当前没有可验证的图片字节。可查看 JSON、恢复任务或重新排版。",
+                    text=self.app.safe_text("当前没有可预览图片。\n" + "\n".join(notices)),
                     width=450,
                 )
                 self.preview_canvas.configure(scrollregion=(0, 0, 500, 100))
@@ -935,120 +1293,10 @@ class LongImagePanel:
             self._draw_visible_preview()
         except Exception as error:
             self.notice.configure(
-                text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
+                text=self.notice.cget("text") + " · "
+                + self.app.safe_text(format_user_error(error, stage="preview").text)
             )
             self._clear_preview()
-
-    def _clear_preview(self):
-        self._preview_epoch += 1
-        self._preview_requested_key = None
-        self._preview_worker.invalidate()
-        if self._preview_timer is not None:
-            self.app.root.after_cancel(self._preview_timer)
-            self._preview_timer = None
-        self.preview_data = self.preview_size = self._preview_source_id = self.photo = None
-        self.thumbnail_cache.clear()
-        self.preview_canvas.delete("all")
-
-    def _preview_destroyed(self, _event=None):
-        self._preview_epoch += 1
-        self._preview_worker.close()
-        if self._preview_timer is not None:
-            self.app.root.after_cancel(self._preview_timer)
-            self._preview_timer = None
-        self.thumbnail_cache.clear()
-        self.photo = None
-
-    def _poll_preview(self):
-        self._preview_timer = None
-        result = self._preview_worker.take()
-        if result is not None:
-            token, key, resized, error = result
-            try:
-                if token == self._preview_epoch and key == self._preview_requested_key:
-                    self._preview_requested_key = None
-                    if error is not None:
-                        self.notice.configure(
-                            text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
-                        )
-                        self._clear_preview()
-                    else:
-                        self.thumbnail_cache[key] = ImageTk.PhotoImage(
-                            resized, master=self.app.root
-                        )
-                        while len(self.thumbnail_cache) > 4:
-                            self.thumbnail_cache.popitem(last=False)
-                        self._draw_visible_preview()
-            except Exception as error:
-                self.notice.configure(
-                    text=self.notice.cget("text") + " · " + self.app.safe_text(str(error))
-                )
-                self._clear_preview()
-            finally:
-                if resized is not None:
-                    resized.close()
-        if self._preview_requested_key is not None:
-            self._preview_timer = self.app.root.after(20, self._poll_preview)
-
-    def _preview_scrolled(self, start, end):
-        self.preview_scrollbar.set(start, end)
-        self._draw_visible_preview()
-
-    def _draw_visible_preview(self):
-        """Cache at most four viewport strips, never resized whole-page copies."""
-        if self.drawing or not self.preview_data or not self.preview_size:
-            return
-        self.drawing = True
-        try:
-            canvas = self.preview_canvas
-            width, height = self.preview_size
-            top = max(0, int(canvas.canvasy(0) - 8))
-            top = (top // 512) * 512
-            bottom = min(height, top + max(512, canvas.winfo_height()) + 512)
-            if bottom <= top:
-                return
-            key = (self._preview_source_id, self.preview_size, top, bottom)
-            if key not in self.thumbnail_cache:
-                if key != self._preview_requested_key:
-                    self._preview_requested_key = key
-                    self._preview_worker.submit(
-                        self._preview_epoch, key, self.preview_data, self.preview_scale
-                    )
-                if self._preview_timer is None:
-                    self._preview_timer = self.app.root.after(20, self._poll_preview)
-                return
-            # A cache hit also invalidates a pending strip for a viewport we left.
-            if self._preview_requested_key is not None:
-                self._preview_requested_key = None
-                self._preview_worker.invalidate()
-            self.photo = self.thumbnail_cache[key]
-            self.thumbnail_cache.move_to_end(key)
-            canvas.delete("all")
-            canvas.create_image(8, top + 8, anchor="nw", image=self.photo)
-        finally:
-            self.drawing = False
-
-    def _preview_resize(self, event):
-        if (
-            self.zoom.get() == "适应宽度"
-            and self.preview_size
-            and abs(event.width - self.preview_size[0] - 16) > 2
-        ):
-            self.refresh_preview()
-        else:
-            self._draw_visible_preview()
-
-    def _wheel(self, event):
-        self._scroll(-int(event.delta / 120), "units")
-        return "break"
-
-    def _scroll(self, direction, unit):
-        self.preview_canvas.yview_scroll(direction, unit)
-        return "break"
-
-    def _edge(self, position):
-        self.preview_canvas.yview_moveto(position)
-        return "break"
 
     def update_actions(self):
         app = self.app

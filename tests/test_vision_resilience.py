@@ -36,6 +36,43 @@ class RawTransport:
         return {"choices": [{"message": message}]}
 
 
+async def test_discovery_root_validation_feedback_names_the_broken_reference(request_data):
+    from image_agent.models import CreationRequest
+    from tests.fakes import analysis_data
+    from tests.test_vision import materials
+
+    bad = analysis_data()
+    bad["subjects"][0]["identity_fact_ids"] = ["missing-fact"]
+    transport = RawTransport([{"content": bad}, {"content": analysis_data()}])
+    result = await VisionClient(transport, AgentConfig()).analyze_materials(
+        CreationRequest(**request_data), materials()
+    )
+    assert result.status == "ready"
+    feedback = transport.calls[1][1]["messages"][0]["content"][0]["text"]
+    assert "unknown fact reference" in feedback
+    assert "value_error" in feedback
+    assert len(transport.calls) == 2
+
+
+async def test_root_validation_message_is_redacted_without_input_or_context():
+    from pydantic import BaseModel, model_validator
+
+    class Invalid(BaseModel):
+        value: str
+
+        @model_validator(mode="after")
+        def invalid(self):
+            raise ValueError("broken reference: token=private-secret C:/private/input.png")
+
+    transport = RawTransport([{"content": {"value": "private-input-value"}}] * 2)
+    with pytest.raises(ProviderError) as caught:
+        await VisionClient(transport, AgentConfig())._call(Invalid, "audit", [])
+    assert "broken reference" in caught.value.message
+    assert "private-secret" not in caught.value.message
+    assert "C:/private" not in caught.value.message
+    assert "private-input-value" not in caught.value.message
+
+
 @pytest.mark.parametrize("shape", ["fence", "text_blocks", "object"])
 async def test_supported_vision_content_wrappers_do_not_trigger_an_extra_call(shape):
     value = audit_data()

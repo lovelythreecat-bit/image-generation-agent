@@ -72,6 +72,12 @@ def write_manifest(result, directory):
 
 async def save_result(result, directory):
     directory = Path(directory).resolve()
+    for relative, payload in getattr(result, "_artifact_blobs", {}).items():
+        path = (directory / relative).resolve()
+        if not path.is_relative_to(directory):
+            raise OutputError("source artifact path escapes output directory")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, payload)
     for asset in result.assets:
         if asset.image is None:
             continue

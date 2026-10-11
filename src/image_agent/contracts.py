@@ -24,6 +24,7 @@ from .models import (
     OutputType,
     Platform,
     ProductInputAudit,
+    ProductLongImageOptions,
     QualityReport,
     ReferenceBinding,
     Role,
@@ -46,6 +47,7 @@ class CreationRequestDTO(Model):
     category: str
     platforms: list[Platform]
     output_types: list[OutputType]
+    long_image: ProductLongImageOptions | None = None
     materials: list[MaterialDTO] = Field(min_length=1, max_length=8)
     creative_brief: str | None = None
     selection: SelectionSpec = Field(default_factory=SelectionSpec)
@@ -79,6 +81,7 @@ class CreationRequestDTO(Model):
             "output_types",
             "market",
             "request_id",
+            "long_image",
         ):
             object.__setattr__(self, field, getattr(normalized, field))
         return self

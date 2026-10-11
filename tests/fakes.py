@@ -58,6 +58,7 @@ def analysis_data():
             "focus_element_ids": ["e1"],
             "unmet_requirements": [],
         },
+        "creative_plan": {"user_requirements": [], "suggestions": []},
         "issues": [],
         "warnings": [],
         "error_info": None,

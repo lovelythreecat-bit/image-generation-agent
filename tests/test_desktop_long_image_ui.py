@@ -323,7 +323,8 @@ def test_corrupt_png_decode_clears_previous_pixels(app, tmp_path):
     app.root.update()
     assert panel.preview_data is None and panel.preview_size is None and panel.photo is None
     assert not panel.thumbnail_cache and not panel.preview_canvas.find_all()
-    assert "truncated" in panel.notice.cget("text")
+    assert "不完整" in panel.notice.cget("text")
+    assert "truncated" not in panel.notice.cget("text")
 
 
 @pytest.mark.parametrize(
@@ -485,6 +486,16 @@ def test_planning_history_deduplicates_missing_usage(app):
     text = panel.planning_text.get("1.0", "end")
     assert len(panel.planning_history) == 2
     assert "2" in text and "不可用" in text
+
+
+def test_long_workspace_operation_error_stays_in_visible_panel(app):
+    from image_agent.errors import ProviderError
+
+    app.set_mode("long_image")
+    app.operation = "plan"
+    app.show_error(ProviderError("provider HTTP 401", kind="http", status_code=401))
+    assert "密钥" in app.long_panel.notice.cget("text")
+    assert app.notebook.select() == str(app.long_panel.preview_tab)
 
 
 def test_selection_submits_same_analysis(app, tmp_path, monkeypatch):

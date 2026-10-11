@@ -44,6 +44,11 @@ STAGES = (
     "save_candidate",
     "audit",
     "repair",
+    "long_plan",
+    "long_generate",
+    "long_save_candidate",
+    "long_audit",
+    "long_compose",
     "finish_asset",
     "group_audit",
     "finish",
@@ -93,6 +98,29 @@ class GraphNodes:
         self.store, self.policy, self.ledger = store, policy, ledger
         self.analysis, self.on_progress = analysis, on_progress
         self.materials = store.materials()
+        from .product_long_image import ProductLongImageWorkflow
+
+        self.long_workflow = ProductLongImageWorkflow(self)
+
+    async def long_plan(self, state):
+        await self.long_workflow.plan(state)
+
+    async def long_generate(self, state):
+        await self.long_workflow.generate(state)
+
+    async def long_save_candidate(self, state):
+        await self.long_workflow.save_candidate(state)
+
+    async def long_audit(self, state):
+        await self.long_workflow.audit(state)
+
+    async def long_compose(self, state):
+        from .errors import OutputError
+
+        try:
+            await self.long_workflow.compose(state)
+        except OSError:
+            raise OutputError("product long-image composition/write failed; saved sections retained") from None
 
     def context(self, state):
         data = dict(state["context"])
@@ -141,7 +169,7 @@ class GraphNodes:
             except (AgentError, ValidationError) as error:
                 if getattr(error, "code", None) == "stale_analysis":
                     raise
-                info = make_error_info(error)
+                info = make_error_info(error, stage=stage)
                 status = (
                     "budget_exhausted"
                     if info.code == "budget_exhausted"
@@ -209,13 +237,17 @@ class GraphNodes:
             status="pending_audit",
         )
         state["result"]["assets"].append(asset.model_dump(mode="json"))
+        if target.output_type == "long_image":
+            from .product_long_image import product_long_image_context
+
+            context = product_long_image_context(context)
         plan = compile_element_plan(self.request, target, context, self.config)
         asset.element_plan, asset.reference_bindings = plan, plan.reference_bindings
         state["result"]["warnings"].extend(issue.message for issue in plan.issues)
         asset.prompt = build_prompt(self.request, target, context, plan, "standard")
         self.update_asset(state, asset)
         state.update(
-            phase="generate",
+            phase="long_plan" if target.output_type == "long_image" else "generate",
             stage="standard",
             repairs=0,
             audit_attempts=0,
@@ -588,7 +620,7 @@ class GraphNodes:
         if queue:
             state["index"] = queue.pop(0)
             state.update(state.get("asset_runtime", {}).get(str(state["index"]), {}))
-            state.update(phase="audit", audit_attempts=0)
+            state.update(phase=self.resume_audit_phase(state), audit_attempts=0)
         elif queue is not None:
             state["phase"] = "group_audit"
         else:
@@ -596,6 +628,20 @@ class GraphNodes:
             state["phase"] = (
                 "prepare_asset" if state["index"] < len(state["targets"]) else "group_audit"
             )
+
+    def resume_audit_phase(self, state):
+        asset = self.asset(state)
+        if asset.output_type != "long_image":
+            return "audit"
+        runtime = state["product_long_images"][asset.asset_id]
+        if runtime.get("resume_phase"):
+            return runtime["resume_phase"]
+        pending = next((i for i, segment in enumerate(runtime["segments"]) if segment["status"] in ("pending_audit", "audit_error") and segment["candidates"]), None)
+        if pending is not None:
+            runtime["section_index"] = pending
+            runtime["segments"][pending]["audit_attempts"] = 0
+            return "long_audit"
+        return "long_compose"
 
     async def group_audit(self, state):
         result, context = self.result(state), self.context(state)

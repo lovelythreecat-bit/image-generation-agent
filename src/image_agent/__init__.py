@@ -56,6 +56,7 @@ from .models import (
     ImageSource,
     MaterialAnalysis,
     MaterialInput,
+    ProductLongImageOptions,
     SelectionSpec,
 )
 from .pipeline import accept_candidate, analyze_materials, create_images, resume_images
@@ -69,6 +70,7 @@ __all__ = [
     "ImageSource",
     "MaterialAnalysis",
     "MaterialInput",
+    "ProductLongImageOptions",
     "SelectionSpec",
     "analyze_materials",
     "create_images",

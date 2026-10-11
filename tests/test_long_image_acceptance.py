@@ -196,7 +196,7 @@ async def test_missing_date_and_invalid_plan_never_submit_an_image(tmp_path):
     assert invalid.status == "failed" and invalid.page is None
     assert invalid.error_info.code == "plan_invalid"
     assert provider.image_posts == 0
-    assert len(provider.posts) == invalid.usage.execution["vision_calls"] == 2
+    assert len(provider.posts) == invalid.usage.execution["vision_calls"] == 4
 
 
 @pytest.mark.asyncio

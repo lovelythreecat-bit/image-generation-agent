@@ -31,6 +31,41 @@ class LongPlanResponse(Model):
     warnings: list[str] = Field(default_factory=list)
 
 
+def _can_complete_visual_gaps(issues):
+    """Only clearly visual choices, with no source/selection/factual blockers."""
+    codes = {
+        "missing_style",
+        "missing_layout",
+        "missing_composition",
+        "missing_lighting",
+        "missing_scene",
+        "missing_palette",
+        "missing_mood",
+        "missing_visual_direction",
+    }
+    fields = {
+        None,
+        "style_hint",
+        "visual_direction",
+        "style",
+        "layout",
+        "composition",
+        "lighting",
+        "scene",
+        "palette",
+        "mood",
+        "theme",
+        "options.theme",
+    }
+    return bool(issues) and all(
+        issue.code in codes
+        and issue.field in fields
+        and issue.resolution in {"input", "reanalyze"}
+        and not (issue.subject_ids or issue.material_ids or issue.element_ids or issue.options)
+        for issue in issues
+    )
+
+
 def explicit_section_count(request):
     text = request.content_brief
     match = re.search(r"(?i)(\d{1,2})\s*(?:段|区块|sections?|blocks?)", text)
@@ -170,10 +205,19 @@ class LongImageVisionClient(VisionClient):
         fingerprint = planning_fingerprint(request, hashes)
         selection = None
         analysis_ref = None
+        source_ready = analysis is None
         if analysis is not None:
             from .long_image_product import LongProductEvidenceRequest
 
-            selection = resolve_selection(LongProductEvidenceRequest(request), analysis).candidate
+            draft = resolve_selection(LongProductEvidenceRequest(request), analysis)
+            selection = draft.candidate
+            source_ready = (
+                analysis.status == "ready"
+                and analysis.error_info is None
+                and selection is not None
+                and not draft.blocking_issues
+                and not draft.pending_issues
+            )
             analysis_ref = LongAnalysisRef(
                 analysis_id=analysis.analysis_id,
                 fingerprint=analysis.fingerprint,
@@ -196,6 +240,8 @@ class LongImageVisionClient(VisionClient):
             "Model-authored optional visual choices belong slot prompts/visual_direction, not requirements. "
             "Do not invent dates, prices, discounts, testimonials, certification, exclusive brand/product facts or concealed product details. "
             "Ask structured needs_input issues with field and resolution=input for genuinely required missing facts. "
+            "Author optional style, layout, composition, lighting and scene choices from existing inputs; "
+            "unspecified aesthetics do not require new user information. Never use such choices to invent factual content. "
             "Do not require platform/materials/product context for nonproduct scenes. "
             "Use tutorial steps, comparison tables, or other appropriate roles without requiring a fixed ecommerce format. "
             "ready requires complete plan and no required issues; needs_input requires actionable issues and no plan. "
@@ -227,6 +273,12 @@ class LongImageVisionClient(VisionClient):
             if result.status == "needs_input":
                 if result.plan is not None or not any(i.required for i in result.issues):
                     raise ProviderError("needs_input requires blocking issues and no plan")
+                if source_ready and _can_complete_visual_gaps(result.issues):
+                    raise ProviderError(
+                        "complete optional visual planning gaps from the existing inputs: "
+                        + ", ".join(issue.code for issue in result.issues)
+                        + "; choose visual direction and return a validated complete plan without inventing facts"
+                    )
                 return result
             if (
                 result.status != "ready"

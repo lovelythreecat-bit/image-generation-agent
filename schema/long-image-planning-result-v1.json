@@ -162,6 +162,18 @@
           ],
           "default": null,
           "title": "Status Code"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
         }
       },
       "required": [

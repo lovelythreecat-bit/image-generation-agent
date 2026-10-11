@@ -57,6 +57,30 @@ def wait_idle(app):
     assert not app.busy
 
 
+def test_failed_analysis_explains_reason_instead_of_only_failed_status(app, tmp_path, monkeypatch):
+    from image_agent.models import ErrorInfo
+
+    fill(app, tmp_path)
+    for field in app.key_fields.values():
+        field.set("test-key")
+    failed = MaterialAnalysis(**(analysis_data() | {
+        "status": "failed",
+        "error_info": ErrorInfo(code="provider_protocol", kind="protocol",
+                                message="vision response violates JSON schema: unknown fact reference",
+                                stage="analyze_materials"),
+    }))
+
+    async def analyze(*args, **kwargs):
+        return failed
+
+    monkeypatch.setattr("image_agent.desktop.analyze_materials", analyze)
+    app.start("analyze")
+    wait_idle(app)
+    assert "素材分析失败" in app.status.get()
+    assert "格式" in app.status.get()
+    assert app.analysis.status == "failed"
+
+
 def test_form_uses_configured_models_and_invalidates_analysis(app, tmp_path):
     path = fill(app, tmp_path)
     assert app.fields["image_model"].get() == "fast"
@@ -236,7 +260,8 @@ def test_failed_asset_shows_diagnostics_without_opening_json(app):
     app.show_result(failed)
     assert app.notebook.index(app.notebook.select()) == 0
     assert app.result_tree.selection() == (asset.asset_id,)
-    assert asset.error in app.preview.cget("text")
+    assert "图片数据" in app.preview.cget("text")
+    assert asset.error not in app.preview.cget("text")
     assert "生成失败" in app.preview.cget("text")
     assert app.preview_image is None
 
@@ -248,12 +273,38 @@ def test_failed_audit_candidate_is_previewed_with_a_persistent_warning(app):
     app.show_result(candidate)
     assert app.preview_image is not None
     assert "未通过审核" in app.asset_notice.cget("text")
-    assert "fact_checks" in app.asset_notice.cget("text")
+    assert "返回格式" in app.asset_notice.cget("text")
+    assert "fact_checks" not in app.asset_notice.cget("text")
     app._resize_preview()
     assert "未通过审核" in app.asset_notice.cget("text")
     assert "候选图 1" in app.status.get()
     app.show_result(result())
     assert app.asset_notice.cget("text") == ""
+
+
+def test_operation_failure_explains_chinese_reason_and_keeps_technical_details(app):
+    from image_agent.errors import ProviderError
+
+    app.operation = "analyze"
+    app.show_error(ProviderError("provider HTTP 401", kind="http", status_code=401))
+    assert "素材分析" in app.status.get()
+    assert "密钥" in app.status.get()
+    assert "HTTP" not in app.status.get()
+    assert "provider HTTP 401" in app.json_text.get("1.0", "end")
+
+
+def test_failed_result_without_assets_displays_reason_in_main_view(app):
+    from image_agent.models import ErrorInfo
+
+    failed = result()
+    failed.assets = []
+    failed.status = "failed"
+    failed.error_info = ErrorInfo(code="provider_protocol", kind="protocol",
+                                  message="plan_product_long_image: invalid JSON")
+    app.show_result(failed)
+    assert "长图策划" in app.status.get()
+    assert "返回格式" in app.preview.cget("text")
+    assert app.notebook.index(app.notebook.select()) == 0
 
 
 def test_clarification_resumes_with_selected_snapshot(app, tmp_path, monkeypatch):
@@ -393,7 +444,8 @@ def test_saved_candidates_can_be_reviewed_and_explicitly_accepted(app, tmp_path,
         }
     ]
     app.show_result(r)
-    assert "no_improvement" in app.asset_notice.cget("text")
+    assert "没有改善" in app.asset_notice.cget("text")
+    assert "no_improvement" not in app.asset_notice.cget("text")
     assert app.candidate_choice.current() == 0
     app.accept_selected()
     assert "原因" in app.status.get() and not app.busy

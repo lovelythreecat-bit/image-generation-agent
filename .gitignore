@@ -12,3 +12,17 @@ dist/
 out/
 examples/秘钥.md
 examples/密钥.md
+
+# Local agent run records, evidence, and diagnostic artifacts
+/.agent-runs/
+/.pytest-*/
+
+# Local environment variants; keep shareable configuration templates
+.env.*
+!.env.example
+!.env.*.example
+
+# Python compilation and build artifacts
+*.pyc
+*.pyo
+/build/

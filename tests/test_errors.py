@@ -5,6 +5,31 @@ from image_agent.desktop_runtime import build_request
 from image_agent.errors import make_error_info
 
 
+def test_error_keeps_actual_failure_stage():
+    from image_agent.errors import ProviderError
+
+    info = make_error_info(
+        ProviderError("provider HTTP 401", kind="http", status_code=401), stage="long_plan"
+    )
+    assert info.stage == "long_plan"
+    assert info.status_code == 401
+    assert info.model_dump()["stage"] == "long_plan"
+
+
+def test_published_error_contract_accepts_recorded_stage():
+    import json
+    from pathlib import Path
+
+    from image_agent.errors import ProviderError
+
+    info = make_error_info(ProviderError("provider HTTP 401", kind="http", status_code=401),
+                           stage="long_plan")
+    schema = json.loads((Path(__file__).resolve().parents[1] / "schema/error-v1.json").read_text(
+        encoding="utf-8"))["$defs"]["ErrorInfo"]
+    assert info.model_dump().keys() <= schema["properties"].keys()
+    assert "stage" not in schema["required"]
+
+
 def test_validation_error_explains_incompatible_white_background(tmp_path):
     with pytest.raises(ValidationError) as caught:
         build_request(

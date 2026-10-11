@@ -25,13 +25,19 @@ from .desktop_runtime import (
 )
 from .errors import AgentError, make_error_info
 from .models import OUTPUTS, PLATFORMS
+from .user_errors import format_user_error
 
 PLATFORM_LABELS = dict(
     zip(
         PLATFORMS, ("Amazon", "淘宝", "天猫", "京东", "拼多多", "Shopee", "Lazada", "SHEIN", "Temu")
     )
 )
-OUTPUT_LABELS = dict(zip(OUTPUTS, ("主图", "详情图（3 张）", "拼多多白底")))
+OUTPUT_LABELS = {
+    "main_image": "主图",
+    "detail_page": "详情图（3 张）",
+    "pdd_white_background": "拼多多白底",
+    "long_image": "长图",
+}
 STATUS_LABELS = {
     "succeeded": "全部成功",
     "partial": "部分成功",
@@ -47,6 +53,11 @@ STATUS_LABELS = {
 }
 STAGE_LABELS = {
     "prepare": "准备任务",
+    "long_plan": "规划商品长图",
+    "long_generate": "生成长图区段",
+    "long_save_candidate": "保存长图候选",
+    "long_audit": "审核长图区段",
+    "long_compose": "拼接长图与切片",
     "plan": "规划长图",
     "prepare_slot": "准备配图槽",
     "finish_slot": "配图处理完成",
@@ -163,7 +174,6 @@ class DesktopApp:
             header, state="readonly", values=("商品图片", "图文长图"), width=11
         )
         self.mode_choice.current(0)
-        self.mode_choice.pack(side="right", padx=16)
         self.mode_choice.bind(
             "<<ComboboxSelected>>",
             lambda e: self.set_mode("long_image" if self.mode_choice.current() == 1 else "product"),
@@ -251,6 +261,15 @@ class DesktopApp:
         ttk.Label(targets, text="图片类型", style="Field.TLabel").pack(anchor="w", pady=(0, 4))
         for name, var in self.outputs.items():
             ttk.Checkbutton(targets, text=OUTPUT_LABELS[name], variable=var).pack(anchor="w")
+        from .desktop_long_image import ProductLongImageControls
+
+        long_parameters = ttk.Frame(targets)
+        long_parameters.pack(fill="x")
+        self.product_long_controls = ProductLongImageControls(self, long_parameters)
+        self.outputs["long_image"].trace_add(
+            "write",
+            lambda *_: self.product_long_controls.set_visible(self.outputs["long_image"].get()),
+        )
         ttk.Label(
             targets,
             text="勾选拼多多白底会同时选中拼多多平台。",
@@ -364,6 +383,9 @@ class DesktopApp:
             highlightbackground=UI_COLORS["border"],
         )
         self.preview.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        from .desktop_long_image import ProductLongImagePreview
+
+        self.product_long_preview = ProductLongImagePreview(self, result_tab)
         result_tab.rowconfigure(3, weight=1)
         result_tab.columnconfigure(0, weight=1)
         self.preview.bind("<Configure>", self._resize_preview)
@@ -775,6 +797,7 @@ class DesktopApp:
             self.material_list.selection_set(0)
             self.preview_material()
         else:
+            self._show_standard_preview()
             self.preview_image = self.preview_photo = None
             self.preview.configure(image="", text="添加素材后可预览\n生成图片将在这里展示")
 
@@ -842,6 +865,7 @@ class DesktopApp:
     def load_task(self, directory):
         if self.busy:
             return
+        self._show_standard_preview()
         self.long_panel.clear_binding()
         self.analysis = self.analysis_signature = None
         self.needs_input = False
@@ -923,11 +947,20 @@ class DesktopApp:
         return config
 
     def _signature(self):
+        controls = getattr(self, "product_long_controls", None)
+        long_text = ("", ())
+        if controls and self.outputs["long_image"].get():
+            long_text = (
+                controls.known_info.get("1.0", "end-1c"),
+                tuple(line for line in controls.copy_text.get("1.0", "end-1c").split("\n")
+                      if line.strip()),
+            )
         return (
             tuple(self.materials),
             self.fields["product_name"].get(),
             self.fields["category"].get(),
             self.brief.get("1.0", "end-1c"),
+            long_text,
         )
 
     def _brief_changed(self, _event=None):
@@ -964,6 +997,9 @@ class DesktopApp:
             **{key: var.get() for key, var in self.fields.items()},
             platforms=[k for k, v in self.platforms.items() if v.get()],
             output_types=[k for k, v in self.outputs.items() if v.get()],
+            long_image=(
+                self.product_long_controls.options() if self.outputs["long_image"].get() else None
+            ),
             creative_brief=self.brief.get("1.0", "end-1c").strip() or None,
             output_dir=Path(self.output_path.get()).expanduser().resolve(),
         )
@@ -975,6 +1011,9 @@ class DesktopApp:
             self.long_panel.start(operation)
             return
         try:
+            if operation != "resume":
+                self.invalidate_analysis()
+                request = self.make_request()
             config = self.session_config()
             if config is None:
                 return
@@ -995,8 +1034,6 @@ class DesktopApp:
                     ),
                 )
                 return
-            self.invalidate_analysis()
-            request = self.make_request()
             for material in self.materials:
                 if not material.is_file():
                     raise ValueError(f"素材文件不存在：{material.name}")
@@ -1155,8 +1192,17 @@ class DesktopApp:
                             self.long_panel.show_result(value)
                     elif self.operation == "analyze":
                         self.show_analysis(value)
-                        self.notebook.select(1)
-                        self.status.set(f"分析完成 · {STATUS_LABELS[value.status]}")
+                        if value.status == "failed" or value.error_info:
+                            explanation = format_user_error(value, stage="analyze_materials")
+                            self.status.set(self.safe_text(explanation.text))
+                            self.asset_notice.configure(text=self.safe_text(explanation.text))
+                            self.preview_image = self.preview_photo = None
+                            self._show_standard_preview()
+                            self.preview.configure(image="", text=self.safe_text(explanation.text))
+                            self.notebook.select(0)
+                        else:
+                            self.notebook.select(1)
+                            self.status.set(f"分析完成 · {STATUS_LABELS[value.status]}")
                     else:
                         self.show_result(value)
                 elif kind == "cancelled":
@@ -1178,11 +1224,15 @@ class DesktopApp:
             self.output_folder = self.run_dir
             if self.mode == "long_image":
                 self.long_panel.run_dir = self.run_dir
-        stage = STAGE_LABELS.get(event.get("stage"), event.get("stage", "处理中"))
+        stage = STAGE_LABELS.get(event.get("stage"), "处理中")
         identifier = event.get("slot_id") or event.get("asset_id")
         detail = f" · {identifier}" if identifier else ""
         attempt = f" · 第 {event['attempt']} 次" if event.get("attempt") else ""
-        message = f" · {event['message']}" if event.get("message") else ""
+        if event.get("error_info") or event.get("stage") == "generation_uncertain":
+            message = " · " + format_user_error(event, stage=event.get("stage")).text
+        else:
+            raw_message = event.get("message") or ""
+            message = " · " + raw_message if re.search(r"[\u4e00-\u9fff]", raw_message) else ""
         self.progress_message = self.safe_text(stage + detail + attempt + message)
         self.status.set(self.progress_message)
 
@@ -1248,6 +1298,7 @@ class DesktopApp:
         self._text(self.creative_text, self.safe_text("\n".join(parts)))
 
     def show_result(self, result):
+        self._show_standard_preview()
         self.run_dir = Path(result.run_dir).resolve() if result.run_dir else None
         self.assets = {a.asset_id: a for a in result.assets}
         self.candidate_options = []
@@ -1257,7 +1308,7 @@ class DesktopApp:
         self.accept_button.configure(state="disabled")
         self.result_tree.delete(*self.result_tree.get_children())
         self.preview_image = self.preview_photo = None
-        self.preview.configure(image="", text="本次任务没有可预览图片，请查看结果 JSON。")
+        self.preview.configure(image="", text="本次任务没有可预览图片。")
         self.asset_notice.configure(text="")
         for asset in result.assets:
             self.result_tree.insert(
@@ -1293,7 +1344,10 @@ class DesktopApp:
         self.status.set(
             f"任务结果 · {STATUS_LABELS.get(result.status, result.status)} · "
             f"成功 {sum(a.status == 'succeeded' for a in result.assets)}/{len(result.assets)} 张"
-            + (" · 保存有错误，请查看 JSON" if result.output_errors else "")
+            + (
+                " · " + format_user_error(result.output_errors[0], stage="output").text
+                if result.output_errors else ""
+            )
             + (
                 f" · 候选图 {sum(a.status not in ('succeeded', 'accepted') and a.image is not None for a in result.assets)} 张（未通过审核）"
                 if any(
@@ -1303,6 +1357,12 @@ class DesktopApp:
                 else ""
             )
         )
+        failures = [a for a in result.assets if a.status not in ("succeeded", "accepted")]
+        if result.error_info or failures:
+            explanation = format_user_error(failures[0] if failures else result)
+            self.status.set(self.safe_text(self.status.get() + " · " + explanation.text))
+            if not result.assets:
+                self.preview.configure(text=self.safe_text(explanation.text))
         first = next((a for a in result.assets if a.image is not None), None)
         if first:
             self.result_tree.selection_set(first.asset_id)
@@ -1313,7 +1373,7 @@ class DesktopApp:
             self.preview_asset()
             self.notebook.select(0)
         else:
-            self.notebook.select(1 if result.status == "needs_input" else 2)
+            self.notebook.select(1 if result.status == "needs_input" else 0)
 
     def safe_text(self, text):
         # Replace exact session credentials, including providers with non-sk key formats.
@@ -1343,8 +1403,18 @@ class DesktopApp:
         if result is not None:
             data = {"error": data, "result": result.model_dump(mode="json")}
         self._text(self.json_text, self.to_json(data))
-        self.status.set("操作失败 · 请查看结果 / 审核 JSON；输入已保留。")
-        self.notebook.select(2)
+        explanation = format_user_error(error, stage=getattr(self, "operation", None))
+        self.status.set(self.safe_text(explanation.text))
+        if self.mode == "long_image":
+            self.long_panel.notice.configure(text=self.safe_text(explanation.text))
+            self.notebook.select(self.long_panel.preview_tab)
+            return
+        self.asset_notice.configure(text=self.safe_text(explanation.text))
+        if result is None:
+            self._show_standard_preview()
+            self.preview_image = self.preview_photo = None
+            self.preview.configure(image="", text=self.safe_text(explanation.text))
+        self.notebook.select(0)
 
     def preview_material(self, _event=None):
         self.asset_notice.configure(text="")
@@ -1396,22 +1466,29 @@ class DesktopApp:
                 notice.append("人工接受 · 未计为自动审核通过")
             elif asset.status != "succeeded" and (asset.image is not None or asset.candidates):
                 notice.append("候选图 · 未通过审核")
-                notice.append(asset.error or STATUS_LABELS.get(asset.status, "审核未完成"))
-            if asset.stop_reason:
-                notice.append("停止原因：" + asset.stop_reason)
+            if asset.status not in ("succeeded", "accepted"):
+                notice.append(format_user_error(asset).text)
+            # Composed long images retain the precise per-section errors in metadata.
+            metadata = (self.candidate_options[-1].get("metadata") or {}) if self.candidate_options else {}
+            for i, segment in enumerate(metadata.get("segments", []), 1):
+                if segment.get("status") not in ("succeeded", "accepted"):
+                    notice.append(format_user_error(segment, stage=f"第 {i} 段审核").text)
             if asset.attempts:
                 notice.append(f"生成记录：{len(asset.attempts)} 次")
             self.asset_notice.configure(text=self.safe_text("\n".join(notice)))
             if asset.image is not None:
-                self._load_preview(io.BytesIO(asset.image))
+                self._load_preview(
+                    io.BytesIO(asset.image), long_image=asset.output_type == "long_image"
+                )
             elif self.candidate_options and self.run_dir:
                 self.preview_candidate()
             else:
+                self._show_standard_preview()
                 self.preview_image = self.preview_photo = None
                 self.preview.configure(
                     image="",
                     text="生成失败\n\n"
-                    + self.safe_text(asset.error or "此资产生成失败")
+                    + self.safe_text(format_user_error(asset).text)
                     + "\n\n诊断信息也已包含在结果 JSON 中，可直接复制或导出。",
                 )
 
@@ -1430,7 +1507,15 @@ class DesktopApp:
                     if asset.status == "accepted"
                     else "\n候选历史；自动交付以资产审核状态为准"
                 )
-                + (f"\n停止原因：{asset.stop_reason}" if asset.stop_reason else "")
+                + (
+                    "\n" + format_user_error(candidate if candidate.get("error_info") else asset).text
+                    if asset.stop_reason or candidate.get("error_info") else ""
+                )
+                + (
+                    f"\n接受原因：{candidate['acceptance']['reason']}"
+                    if (candidate.get("acceptance") or {}).get("reason")
+                    else ""
+                )
             )
         )
         self.accept_button.configure(
@@ -1439,12 +1524,43 @@ class DesktopApp:
         try:
             if not candidate.get("file_path"):
                 raise ValueError("此候选没有可用的本地图片。")
-            self._load_preview(saved_image_path(self.run_dir, candidate["file_path"]))
+            self._load_preview(
+                saved_image_path(self.run_dir, candidate["file_path"]),
+                long_image=asset.output_type == "long_image",
+            )
         except (OSError, ValueError) as error:
+            self._show_standard_preview()
             self.preview_image = self.preview_photo = None
-            self.preview.configure(image="", text=self.safe_text(str(error)))
+            self.preview.configure(
+                image="", text=self.safe_text(format_user_error(error, stage="preview").text)
+            )
 
-    def _load_preview(self, source):
+    def _show_standard_preview(self):
+        self.product_long_preview.clear()
+        self.product_long_preview.frame.grid_remove()
+        self.preview.grid()
+
+    def _load_preview(self, source, *, long_image=False):
+        if long_image:
+            self.preview_image = self.preview_photo = None
+            self.preview.grid_remove()
+            self.product_long_preview.frame.grid(
+                row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0)
+            )
+            try:
+                data = (
+                    source.getvalue()
+                    if isinstance(source, io.BytesIO)
+                    else Path(source).read_bytes()
+                )
+                self.product_long_preview.set_source(data)
+            except (OSError, ValueError) as error:
+                self.product_long_preview.clear()
+                self.asset_notice.configure(
+                    text=self.safe_text(format_user_error(error, stage="preview").text)
+                )
+            return
+        self._show_standard_preview()
         try:
             with Image.open(source) as image:
                 image = ImageOps.exif_transpose(image)
@@ -1453,7 +1569,9 @@ class DesktopApp:
             self._resize_preview()
         except (OSError, ValueError, Image.DecompressionBombError) as error:
             self.preview_image = self.preview_photo = None
-            self.preview.configure(image="", text=f"无法预览：{self.safe_text(str(error))}")
+            self.preview.configure(
+                image="", text=self.safe_text(format_user_error(error, stage="preview").text)
+            )
 
     def _resize_preview(self, _event=None):
         self.preview.configure(wraplength=max(180, self.preview.winfo_width() - 32))
@@ -1513,6 +1631,7 @@ class DesktopApp:
             self._destroy()
 
     def _destroy(self):
+        self.product_long_preview._preview_destroyed()
         self.root.after_cancel(self.poll_timer)
         self.progress.stop()
         self.root.destroy()

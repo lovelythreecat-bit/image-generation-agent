@@ -192,7 +192,7 @@ def resolve_presentation(request, observed_product=""):
 
 def build_targets(request, presentation_mode):
     targets = []
-    for output in ("main_image", "detail_page", "pdd_white_background"):
+    for output in ("main_image", "detail_page", "pdd_white_background", "long_image"):
         if output not in request.output_types:
             continue
         white = output == "pdd_white_background"
@@ -203,7 +203,9 @@ def build_targets(request, presentation_mode):
                         platform=platform,
                         output_type=output,
                         variant=variant,
-                        aspect_ratio="1:1"
+                        aspect_ratio=request.long_image.segment_aspect_ratio
+                        if output == "long_image"
+                        else "1:1"
                         if white
                         else request.aspect_ratio
                         if request.aspect_ratio != "auto"
@@ -253,6 +255,12 @@ def build_prompt(request, target, context, plan, mode="standard"):
         PRODUCT_APPEARANCE_POLICY,
         SOURCE_VIEW_POLICY,
         MARKETING_POLICY,
+        "Complete unspecified aesthetic and structural choices using the original inputs: "
+        "composition, lighting, spacing, palette and an appropriate image-role layout. "
+        "When optional product information is absent, use a source-supported view or crop "
+        "and omit unsupported claims, specs, certifications, sales figures or accessories. "
+        "Preserve exact user marketing copy and product appearance. For white catalog "
+        "images, retain the required pure white background and permitted product-only composition.",
         user_directions(request),
     ]
     if target.presentation_mode == "model_wear":
@@ -330,7 +338,10 @@ def build_prompt(request, target, context, plan, mode="standard"):
             )
     if context.product_attributes:
         parts.append(
-            "VISIBLE GARMENT FACTS: " + json.dumps(context.product_attributes, ensure_ascii=False)
+            "SOURCE APPEARANCE OBSERVATIONS (auxiliary model observations; original images "
+            "take precedence over mistaken descriptions; never complete unknown regions or "
+            "invent presence/absence of concealed components): "
+            + json.dumps(context.product_attributes, ensure_ascii=False)
         )
     if mode == "strict":
         parts.append(
@@ -338,7 +349,7 @@ def build_prompt(request, target, context, plan, mode="standard"):
         )
         parts.append(
             {
-                "scene": "Show a credible environment.",
+                "scene": "Follow the user's requested environment and creative premise, including surreal scenes.",
                 "feature": "Use tighter framing, composition and copy to emphasize the selling point within a source-supported product view.",
                 "closeup": "Use true macro framing, not a full body view.",
             }.get(target.variant, "Keep complete products visible.")

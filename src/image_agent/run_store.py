@@ -2,13 +2,87 @@
 
 import hashlib
 import json
+import logging
 import os
+import re
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from .errors import AgentError, ConfigurationError, OutputError, ProviderError
 from .models import CreationRequest, LoadedMaterial
 from .output import atomic_write
+
+_vision_diagnostics = ContextVar("image_agent_vision_diagnostics", default=None)
+
+
+@contextmanager
+def vision_diagnostic_scope(store, *, asset_id=None):
+    """Bind planning evidence to the current run without mutating injected clients."""
+    token = _vision_diagnostics.set((store, asset_id))
+    try:
+        yield
+    finally:
+        _vision_diagnostics.reset(token)
+
+
+def _diagnostic_value(value):
+    """Retain model content without inline image payloads or credential fields."""
+    if isinstance(value, dict):
+        sensitive = {
+            "headers",
+            "authorization",
+            "api_key",
+            "apikey",
+            "token",
+            "password",
+            "image_url",
+        }
+        return {
+            key: _diagnostic_value(item)
+            for key, item in value.items()
+            if str(key).casefold() not in sensitive
+        }
+    if isinstance(value, list):
+        return [_diagnostic_value(item) for item in value]
+    if isinstance(value, str):
+        value = re.sub(r"data:[^\s\"']+", "[inline data redacted]", value, flags=re.I)
+        value = re.sub(r"(?i)(bearer\s+)[^\s,;\"']+", r"\1[redacted]", value)
+        value = re.sub(
+            r"(?i)((?:api[_-]?key|token|authorization|password)[\"']?\s*[=:]\s*[\"']?)[^\s,;\"']+",
+            r"\1[redacted]",
+            value,
+        )
+        return re.sub(r"sk-[\w-]+", "[redacted]", value)
+    return value
+
+
+def save_vision_diagnostic(
+    *, call_id, stage, attempt, attempts, response_content, parsed_plan, validation_problem
+):
+    scope = _vision_diagnostics.get()
+    if scope is None:
+        return
+    store, asset_id = scope
+    try:
+        payload = {
+            "stage": stage,
+            "asset_id": asset_id,
+            "attempt": attempt,
+            "attempts": attempts,
+            "response_content": _diagnostic_value(response_content),
+            "parsed_plan": _diagnostic_value(parsed_plan.model_dump(mode="json"))
+            if parsed_plan is not None
+            else None,
+            "validation_problem": _diagnostic_value(validation_problem),
+        }
+        store.json(f"diagnostics/vision/{call_id}/{attempt:02d}.json", payload)
+    except Exception as error:
+        # Diagnostics are best effort: a full disk must not hide the provider
+        # validation failure or turn a valid returned plan into a retry.
+        logging.getLogger(__name__).warning(
+            "Planning diagnostic persistence failed (%s)", type(error).__name__
+        )
 
 
 def digest(data):
@@ -23,6 +97,7 @@ def config_fingerprint(config):
             "http_proxy",
             "request_timeout_seconds",
             "model_concurrency",
+            "model_completion_attempts",
             "services",
         },
     )
@@ -210,3 +285,31 @@ class RunStore:
                 self.read({"path": candidate["file_path"], "sha256": candidate["sha256"]})
         if state.get("raw"):
             self.read(state["raw"])
+
+        def verify_refs(value):
+            if isinstance(value, dict):
+                if "path" in value and "sha256" in value:
+                    self.read(value)
+                if "plan_ref" in value and "plan" in value:
+                    try:
+                        persisted_plan = json.loads(self.read(value["plan_ref"]))
+                    except (ValueError, TypeError):
+                        raise OutputError("persisted plan integrity validation failed") from None
+                    if persisted_plan != value["plan"]:
+                        raise OutputError("persisted plan integrity validation failed")
+                for nested in value.values():
+                    verify_refs(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    verify_refs(nested)
+
+        verify_refs(state.get("product_long_images", {}))
+        for asset in state["result"]["assets"]:
+            if asset["output_type"] == "long_image":
+                for candidate in asset.get("candidates", []):
+                    verify_refs(candidate.get("metadata", {}))
+        if self.exists("operations.json"):
+            for operation in self.json("operations.json").values():
+                if operation.get("status") == "saved":
+                    self.read(operation["raw"])
+                    verify_refs(operation.get("long_runtime", {}))

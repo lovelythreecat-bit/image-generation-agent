@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 
+from .completion import completion_problems, maybe_complete_analysis
 from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError
 from .long_image_models import LongImageRequirement
@@ -157,6 +158,25 @@ def _context(request, materials, analysis, selection):
     )
 
 
+async def _review_product_evidence(adapter, materials, analysis, draft, vision):
+    if draft.candidate is None or draft.blocking_issues:
+        return None
+    evidence = await vision.validate_evidence(adapter, materials, analysis, draft)
+    expected = {
+        "subject_id": draft.candidate.subject_ids,
+        "fact_id": selected_fact_ids(analysis, draft.candidate),
+        "issue_id": [i.issue_id for i in draft.pending_issues],
+    }
+    for key, ids in expected.items():
+        rows = (
+            evidence.issue_resolutions
+            if key == "issue_id"
+            else getattr(evidence, key.removesuffix("_id") + "_checks")
+        )
+        validate_check_ids(rows, ids, key)
+    return evidence
+
+
 async def prepare_long_product(request, materials, *, analysis, vision, config=None):
     """Caller owns the enclosing vision call_scope for all discovery/evidence POSTs."""
     if request.scene != "product_detail":
@@ -198,7 +218,7 @@ async def prepare_long_product(request, materials, *, analysis, vision, config=N
         m.material_id: m.sha256 for m in materials
     }:
         raise StaleAnalysisError("analysis hashes differ from source bytes")
-    if analysis.status == "failed":
+    if analysis.status == "failed" or analysis.error_info is not None:
         return PreparedLongProduct(
             materials,
             analysis,
@@ -207,25 +227,29 @@ async def prepare_long_product(request, materials, *, analysis, vision, config=N
             or ErrorInfo(code="provider_protocol", kind="protocol", message="素材分析失败"),
             config=config,
         )
+    analysis = await maybe_complete_analysis(adapter, materials, analysis, vision, config)
     draft = resolve_selection(adapter, analysis)
     evidence = None
     # A supplied snapshot is always rechecked unless a trusted planning record was resolved
     # by prepare_long_plan, which uses product_from_plan instead of this paid path.
     if draft.candidate and not draft.blocking_issues and (supplied or draft.pending_issues):
-        evidence = await vision.validate_evidence(adapter, materials, analysis, draft)
-        expected = {
-            "subject_id": draft.candidate.subject_ids,
-            "fact_id": selected_fact_ids(analysis, draft.candidate),
-            "issue_id": [i.issue_id for i in draft.pending_issues],
-        }
-        for key, ids in expected.items():
-            rows = (
-                evidence.issue_resolutions
-                if key == "issue_id"
-                else getattr(evidence, key.removesuffix("_id") + "_checks")
-            )
-            validate_check_ids(rows, ids, key)
+        evidence = await _review_product_evidence(adapter, materials, analysis, draft, vision)
     resolution = finalize_selection(draft, evidence)
+    if resolution.status == "needs_input" and evidence is not None and resolution.issues:
+        completed = await maybe_complete_analysis(
+            adapter, materials, analysis, vision, config, additional_issues=resolution.issues
+        )
+        if completed is not analysis:
+            analysis = completed
+            draft = resolve_selection(adapter, analysis)
+            evidence = await _review_product_evidence(adapter, materials, analysis, draft, vision)
+            resolution = finalize_selection(draft, evidence)
+            if resolution.status == "needs_input" and completion_problems(
+                adapter, analysis, additional_issues=resolution.issues
+            ):
+                raise ProviderError(
+                    "evidence review still reports unresolved creative planning gaps"
+                )
     product = PreparedLongProduct(
         materials,
         analysis,

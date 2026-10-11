@@ -15,7 +15,7 @@ Role = Literal["auto", "identity", "detail", "accessory", "scene", "style"]
 Platform = Literal[
     "amazon", "taobao", "tmall", "jd", "pinduoduo", "shopee", "lazada", "shein", "temu"
 ]
-OutputType = Literal["main_image", "detail_page", "pdd_white_background"]
+OutputType = Literal["main_image", "detail_page", "pdd_white_background", "long_image"]
 Presence = Literal["present", "absent", "not_applicable"]
 Verifiability = Literal["visible_appearance", "functional_claim", "unverified"]
 AssetStatus = Literal[
@@ -30,7 +30,7 @@ AssetStatus = Literal[
     "generation_uncertain",
 ]
 PLATFORMS = ("amazon", "taobao", "tmall", "jd", "pinduoduo", "shopee", "lazada", "shein", "temu")
-OUTPUTS = ("main_image", "detail_page", "pdd_white_background")
+OUTPUTS = ("main_image", "detail_page", "pdd_white_background", "long_image")
 
 
 class Model(BaseModel):
@@ -121,11 +121,29 @@ class SelectionSpec(Model):
         return self
 
 
+class ProductLongImageOptions(Model):
+    width: int = Field(default=750, strict=True, ge=400, le=2400)
+    segment_count: int = Field(default=6, strict=True, ge=3, le=12)
+    segment_aspect_ratio: Literal["3:4", "4:5", "9:16"] = "3:4"
+    known_info: str = Field(default="", max_length=12000)
+    required_copy: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=30
+    )
+
+    @field_validator("required_copy")
+    @classmethod
+    def nonblank_copy(cls, values):
+        if any(not value.strip() for value in values):
+            raise ValueError("required copy must not be blank")
+        return values
+
+
 class CreationRequest(Model):
     product_name: str
     category: str
     platforms: list[Platform]
     output_types: list[OutputType]
+    long_image: ProductLongImageOptions | None = None
     materials: list[MaterialInput] = Field(default_factory=list, max_length=8)
     creative_brief: str | None = None
     selection: SelectionSpec = Field(default_factory=SelectionSpec)
@@ -174,6 +192,8 @@ class CreationRequest(Model):
 
     @model_validator(mode="after")
     def compatible(self):
+        if "long_image" in self.output_types and self.long_image is None:
+            object.__setattr__(self, "long_image", ProductLongImageOptions())
         if self.materials:
             if self.product_image is not None or self.reference_images:
                 raise ValueError("materials and legacy inputs are mutually exclusive")
@@ -229,6 +249,7 @@ class ErrorInfo(Model):
     message: str
     retryable: bool = False
     status_code: int | None = None
+    stage: str | None = None
 
 
 class MaterialObservation(Model):
@@ -452,9 +473,11 @@ class MaterialAnalysis(Model):
         return self
 
     def validate_intent_source(self, request):
+        from .marketing import user_brief_sources
+
         materials = {m.material_id: m for m in request.normalized_materials()}
         if self.creative_plan:
-            sources = [request.creative_brief or "", request.style_hint or ""]
+            sources = [*user_brief_sources(request), request.style_hint or ""]
             for material in materials.values():
                 sources.extend([material.subject_hint or "", *material.element_hints])
             if any(
@@ -465,7 +488,7 @@ class MaterialAnalysis(Model):
         if self.intent:
             for c in self.intent.constraints:
                 if c.source == "brief":
-                    sources = [request.creative_brief or ""]
+                    sources = user_brief_sources(request)
                 elif c.source == "style_hint":
                     sources = [request.style_hint or ""]
                 else:

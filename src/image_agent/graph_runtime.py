@@ -69,6 +69,24 @@ def hydrate_result(state, store):
                 for candidate in asset.candidates
             },
         )
+        artifacts = {}
+
+        def collect(value):
+            if isinstance(value, dict):
+                if "path" in value and "sha256" in value:
+                    artifacts[value["path"]] = store.read(value)
+                for nested in value.values():
+                    collect(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    collect(nested)
+
+        collect(state.get("product_long_images", {}))
+        for asset in result.assets:
+            if asset.output_type == "long_image":
+                for candidate in asset.candidates:
+                    collect(candidate.get("metadata", {}))
+        object.__setattr__(result, "_artifact_blobs", artifacts)
     return result
 
 
@@ -184,12 +202,36 @@ async def resume_pipeline(run_dir, config, *, dependencies, on_progress=None):
                 i
                 for i, asset in enumerate(state["result"]["assets"])
                 if asset["status"] in ("audit_error", "pending_audit")
+                or (
+                    asset["output_type"] == "long_image"
+                    and state.get("product_long_images", {})
+                    .get(asset["asset_id"], {})
+                    .get("resume_phase")
+                    == "long_compose"
+                )
             ]
             if pending:
                 state.update(
                     index=pending[0], resume_queue=pending[1:], phase="audit", audit_attempts=0
                 )
                 state.update(state.get("asset_runtime", {}).get(str(pending[0]), {}))
+                asset = state["result"]["assets"][pending[0]]
+                if asset["output_type"] == "long_image":
+                    runtime = state["product_long_images"][asset["asset_id"]]
+                    segment_index = next(
+                        (
+                            i
+                            for i, s in enumerate(runtime["segments"])
+                            if s["candidates"] and s["status"] in ("audit_error", "pending_audit")
+                        ),
+                        None,
+                    )
+                    if segment_index is not None:
+                        runtime["section_index"] = segment_index
+                        runtime["segments"][segment_index]["audit_attempts"] = 0
+                    state["phase"] = runtime.get("resume_phase") or (
+                        "long_audit" if segment_index is not None else "long_compose"
+                    )
             elif any(a.get("error") for a in state["result"]["detail_set_audits"]):
                 state["phase"] = "group_audit"
             else:

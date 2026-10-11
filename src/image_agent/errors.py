@@ -43,11 +43,12 @@ class OutputError(AgentError):
         self.result = result
 
 
-def make_error_info(error):
+def make_error_info(error, *, stage=None):
     if isinstance(error, ValidationError):
         return ErrorInfo(
             code="validation",
             kind="validation",
+            stage=stage,
             message=redact(
                 "; ".join(
                     f"{'.'.join(map(str, e['loc'])) or 'request'}: {e['msg']}"
@@ -60,6 +61,7 @@ def make_error_info(error):
         kind=error.kind,
         message=redact(error.message),
         status_code=error.status_code,
+        stage=stage,
         retryable=error.code != "generation_uncertain"
         and (
             error.kind == "transport"

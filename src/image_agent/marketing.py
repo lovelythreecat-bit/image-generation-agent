@@ -12,7 +12,12 @@ MARKETING_POLICY = (
     "a marketing statement. User-requested marketing text, labels and callouts take precedence "
     "over generic restrictions on promotional overlays. Do not invent additional claims the "
     "user did not supply. Keep source-product identity and technical image checks separate "
-    "from the truth of marketing statements."
+    "from the truth of marketing statements. "
+    "USER CREATIVE POLICY: Follow explicit surreal or physically impossible scene, motion and "
+    "presentation requests without correcting them to realistic alternatives. Creative freedom "
+    "applies to the setting, composition, lighting, layout and unchanged product's placement. "
+    "Never add physical product components or change source-product appearance to enact a creative "
+    "premise. Review and correction must preserve that premise and the user's supplied copy."
 )
 
 
@@ -21,8 +26,17 @@ def user_directions(request):
     return "USER CREATIVE INPUT:\n" + json.dumps(creative_input(request), ensure_ascii=False)
 
 
+def user_brief_sources(request):
+    """All original text entered as product information or explicit copy."""
+    sources = [request.creative_brief or ""]
+    options = getattr(request, "long_image", None)
+    if options is not None:
+        sources.extend([options.known_info, *options.required_copy])
+    return sources
+
+
 def creative_input(request):
-    return {
+    inputs = {
         "product_name": request.product_name,
         "category": request.category,
         "brief": request.creative_brief,
@@ -36,3 +50,10 @@ def creative_input(request):
             for m in request.normalized_materials()
         ],
     }
+    options = getattr(request, "long_image", None)
+    if options is not None:
+        inputs["long_image"] = {
+            "known_info": options.known_info,
+            "required_copy": options.required_copy,
+        }
+    return inputs
