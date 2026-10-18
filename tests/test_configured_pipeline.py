@@ -78,7 +78,7 @@ async def test_full_pipeline_routes_same_model_by_alias(
                 reason="ok",
             )
             if audit_reply == "fail" or (audit_reply == "repair" and audit_calls == 1):
-                del result["fact_checks"]
+                del result["subject_checks"]
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
 
     monkeypatch.setattr(
@@ -108,7 +108,7 @@ async def test_full_pipeline_routes_same_model_by_alias(
     if audit_reply == "fail":
         assert result.assets[0].quality is None
         assert "audit_image" in result.assets[0].error
-        assert "fact_checks" in result.assets[0].error
+        assert "subject_checks" in result.assets[0].error
 
 
 async def test_missing_configured_key_and_alias_fail_before_output(

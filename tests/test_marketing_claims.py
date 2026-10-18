@@ -140,12 +140,12 @@ async def test_claims_survive_generation_and_quality_repair(request_data):
 
 
 @pytest.mark.parametrize("source_type", ["visual", "product_label"])
-def test_marketing_policy_keeps_visible_identity_evidence_requirements(request_data, source_type):
+def test_fact_evidence_no_longer_blocks_selected_product(request_data, source_type):
     data = fact_data(verifiability="unverified", source_type=source_type)
     request = CreationRequest(**request_data)
     result = finalize_selection(resolve_selection(request, MaterialAnalysis(**data)))
-    assert result.status == "needs_input"
-    assert any(i.code == "missing_evidence" for i in result.issues)
+    assert result.status == "ready"
+    assert not result.issues
 
 
 async def test_audit_receives_original_claim_and_does_not_check_its_truth(request_data):

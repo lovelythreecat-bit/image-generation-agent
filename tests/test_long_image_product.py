@@ -360,7 +360,7 @@ async def test_product_audit_uses_scoped_quality_report_and_strict_ids():
         )
     assert quality.passed
     assert quality.deterministic_checks.width == 768
-    assert [f.fact_id for f in quality.fact_checks] == ["f1"]
+    assert "fact_checks" not in quality.model_dump()
     assert ledger.usage()["vision_calls"] == 1
     ledger.close()
 
@@ -446,7 +446,7 @@ async def test_product_native_label_is_not_exempted_as_optional_decoration(optio
     report = await FakeVision().audit_image(
         compiled.evidence_request, compiled.target, compiled.context, compiled.element_plan, png()
     )
-    next(check for check in report.fact_checks if check.fact_id == "native").fidelity_score = 30
+    report.subject_checks[0].same_product = False
     quality = evaluate_quality(
         report,
         PixelChecks(passed=True, width=768, height=768, reason="ok"),
@@ -454,7 +454,7 @@ async def test_product_native_label_is_not_exempted_as_optional_decoration(optio
         compiled.element_plan,
     )
     assert not quality.passed
-    assert any("native" in defect for defect in quality.failed_checks)
+    assert any("商品一致性" in defect for defect in quality.failed_checks)
 
 
 @pytest.mark.asyncio

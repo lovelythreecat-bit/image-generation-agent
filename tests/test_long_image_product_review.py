@@ -151,7 +151,7 @@ class ScopedProvider(OfflineProvider):
         else:
             payload = json.loads(request.content)
             text = payload["messages"][0]["content"][0]["text"]
-            if "Audit the exact frozen product requirements" in text:
+            if "Audit the frozen subject, element and constraint requirements" in text:
                 data = instruction_object(text, "expected_check_ids")
                 self.audit_payloads.append(data)
                 if len(self.audit_payloads) == 1:
@@ -200,7 +200,8 @@ async def test_generation_audit_and_repair_payloads_only_consume_current_product
         assert audit["plan"]["constraints"][0]["priority"] == (
             "preferred" if own == "blue" and not blue_required else "required"
         )
-        assert {"f1", "native"} <= set(audit["expected_check_ids"]["fact_id"])
+        assert "fact_id" not in audit["expected_check_ids"]
+        assert {"f1", "native"} <= set(audit["plan"]["required_fact_ids"])
         serialized_audit = json.dumps(audit, ensure_ascii=False)
         assert own_text in serialized_audit and other not in serialized_audit
         assert "ACME" in serialized_audit

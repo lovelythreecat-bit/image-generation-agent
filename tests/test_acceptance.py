@@ -154,14 +154,14 @@ async def test_quality_failure_partial_keeps_candidate_outside_approved_outputs(
     request_data["output_types"] = ["main_image", "detail_page"]
     r, deps, vision, gen = setup(request_data, scores={"feature": [{"output_intent": 50}]})
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert result.status == "partial" and result.error_info is None
+    assert result.status == 'succeeded' and result.error_info is None
     failed = result.assets[2]
     assert (
         failed.image is not None
         and failed.file_path is None
-        and failed.error_info.code == "quality_failed"
+        and failed.error_info is None and failed.delivery is not None
     )
-    assert failed.error == failed.error_info.message and not result.detail_set_audits[0].passed
+    assert failed.error is None and not failed.quality.passed
     await save_result(result, tmp_path)
     assert (
         tmp_path / "candidates/taobao.detail_page.feature/c0002.png"
@@ -171,7 +171,7 @@ async def test_quality_failure_partial_keeps_candidate_outside_approved_outputs(
     assert bundle.blobs[failed.asset_id] == failed.image
     assert (
         next(a for a in bundle.dto.assets if a.asset_id == failed.asset_id).status
-        == "quality_failed"
+        == 'succeeded'
     )
     assert len(bundle.blobs) == 4
 
@@ -189,7 +189,9 @@ async def test_staged_scene_failure_no_fusion(request_data):
 
     gen.generate = generate
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert len(gen.calls) == 2 and result.assets[0].error_info.kind == "protocol"
+    assert len(gen.calls) == 2 and result.assets[0].status == 'succeeded'
+    assert result.assets[0].delivery.candidate_id == 'c0001'
+    assert result.assets[0].attempts[-1].error_info.kind == 'protocol'
 
 
 @pytest.mark.parametrize(

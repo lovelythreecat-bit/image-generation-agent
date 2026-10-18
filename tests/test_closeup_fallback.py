@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from image_agent.config import AgentConfig
-from image_agent.errors import ProviderError
 from image_agent.models import CreationRequest
 from image_agent.pipeline import run_pipeline
 from image_agent.prompt import build_prompt, build_targets
@@ -69,19 +68,23 @@ def test_closeup_fallback_preserves_other_identity_facts_if_visible(request_data
         ("visible_appearance", "unknown", 1.0),
     ],
 )
-def test_closeup_fallback_rejects_untrusted_facts(request_data, verification, source, confidence):
+def test_closeup_falls_back_to_source_when_facts_are_untrusted(
+    request_data, verification, source, confidence
+):
     data = facts_only_data()
     data["facts"][0]["verifiability"] = verification
     data["facts"][0]["evidence"][0]["source_type"] = source
     data["facts"][0]["confidence"] = confidence
     request = CreationRequest(**(request_data | {"output_types": ["detail_page"]}))
-    with pytest.raises(ProviderError, match="特写缺少可信的焦点细节"):
-        compile_element_plan(
-            request,
-            build_targets(request, "product_only")[-1],
-            context(request, data),
-            AgentConfig(),
-        )
+    plan = compile_element_plan(
+        request,
+        build_targets(request, "product_only")[-1],
+        context(request, data),
+        AgentConfig(),
+    )
+    assert plan.generation_material_ids == ["m1"]
+    assert plan.focus_element_id is None
+    assert not any(r.target_kind == "fact" and r.origin == "shot_rule" for r in plan.requirements)
 
 
 def test_closeup_fallback_does_not_reintroduce_excluded_detail(request_data):
@@ -90,10 +93,12 @@ def test_closeup_fallback_does_not_reintroduce_excluded_detail(request_data):
     data["intent"]["proposal"]["excluded_element_ids"] = ["e1"]
     data["intent"]["focus_element_ids"] = []
     request = CreationRequest(**(request_data | {"output_types": ["detail_page"]}))
-    with pytest.raises(ProviderError, match="特写缺少可信的焦点细节"):
-        compile_element_plan(
-            request,
-            build_targets(request, "product_only")[-1],
-            context(request, data),
-            AgentConfig(),
-        )
+    plan = compile_element_plan(
+        request,
+        build_targets(request, "product_only")[-1],
+        context(request, data),
+        AgentConfig(),
+    )
+    assert plan.generation_material_ids == ["m1"]
+    assert plan.focus_element_id is None
+    assert not any(r.target_kind == "fact" and r.origin == "shot_rule" for r in plan.requirements)

@@ -392,7 +392,7 @@ class LongImageVisionClient(VisionClient):
         element_plan = prepared.element_plan
         expected = {
             kind + "_id": [r.target_id for r in element_plan.requirements if r.target_kind == kind]
-            for kind in ("subject", "fact", "element", "constraint")
+            for kind in ("subject", "element", "constraint")
         }
 
         def validate(audit):
@@ -404,7 +404,7 @@ class LongImageVisionClient(VisionClient):
         from .platforms import audit_instruction
 
         instruction = (
-            "Audit the exact frozen product requirements for this single long-image slot. "
+            "Audit the frozen subject, element and constraint requirements for this single long-image slot. Facts are creative context only; do not return independent fact checks or evaluate the truth of claims. "
             "Return each expected ID once, no missing/additional checks. Preserve original labels, designs and visible structure. "
             "Page copy is rendered locally and does not enter this audit. Check only slot-specific visual requirements, "
             "never require an image to prove marketing claims. Scores and physical identity decisions follow the existing product audit schema. "

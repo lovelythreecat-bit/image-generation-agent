@@ -249,6 +249,59 @@ async def resume_pipeline(run_dir, config, *, dependencies, on_progress=None):
         )
 
 
+def recover_best_available(run_dir):
+    """Re-publish already terminal candidates under the approved delivery policy.
+
+    No generator, model client or budget reservation is involved. The caller must
+    serialize this explicit recovery against the HTTP task's worker ownership.
+    """
+    from .delivery import delivery_warning, select_best_available
+    from .models import AssetTarget
+
+    store = RunStore(run_dir)
+    with store.lock():
+        store.load_metadata()
+        state = store.json('state.json')
+        if state['phase'] != 'done':
+            raise AgentError('finish the original workflow before delivery recovery')
+        result = CreationResult.model_validate(state['result'])
+        for index, asset in enumerate(result.assets):
+            if asset.status in ('succeeded', 'accepted'):
+                continue
+            target = AssetTarget.model_validate(state['targets'][index])
+            if asset.output_type == 'long_image':
+                from .product_long_image_delivery import compose_best_sections
+
+                runtime = state['product_long_images'][asset.asset_id]
+                options = store.request().long_image
+                try:
+                    compose_best_sections(asset, target, runtime, store, options.width)
+                except (AgentError, OSError, ValueError):
+                    # A historical full image remains deliverable even when its
+                    # old section files can no longer be recomposed locally.
+                    if not any(c['status'] != 'stage' for c in asset.candidates):
+                        raise
+                    result.warnings.append(asset.asset_id + ': 原分段无法重新拼接，已检查保存的完整长图候选')
+            data = select_best_available(asset, target, lambda c: store.read(
+                {'path': c['file_path'], 'sha256': c['sha256']}))
+            if data is not None:
+                ref = store.write(f'delivered/{asset.asset_id}{image_suffix(data)}', data)
+                asset.file_path = ref['path']
+                result.warnings.append(delivery_warning(asset))
+        aggregate(result)
+        result.warnings = list(dict.fromkeys(result.warnings))
+        state['result'] = result.model_dump(mode='json')
+        store.json('state.json', state)
+        write_manifest(result, store.directory)
+        return hydrate_result(state, store)
+
+
+def image_suffix(data):
+    from .images import image_format
+
+    return image_format(data)[0]
+
+
 async def accept_saved_candidate(run_dir, asset_id, candidate_id, *, reason):
     if not isinstance(reason, str) or not reason.strip():
         raise AgentError("acceptance reason is required")
@@ -268,7 +321,7 @@ async def accept_saved_candidate(run_dir, asset_id, candidate_id, *, reason):
         )
         if candidate is None or candidate["status"] == "stage":
             raise AgentError("final candidate not found")
-        if asset.status == "succeeded":
+        if asset.status == "succeeded" and asset.delivery is None:
             raise AgentError("automatically approved asset does not need manual acceptance")
         from datetime import datetime, timezone
 
@@ -282,6 +335,7 @@ async def accept_saved_candidate(run_dir, asset_id, candidate_id, *, reason):
             ref["path"],
             "manually_accepted",
         )
+        asset.delivery = None
         candidate["acceptance"] = {
             "reason": redact(reason.strip()),
             "at": datetime.now(timezone.utc).isoformat(),

@@ -70,6 +70,7 @@ async def smoke():
             "focus_element_ids": ["e1"],
             "unmet_requirements": [],
         },
+        "creative_plan": {"user_requirements": [], "suggestions": []},
     }
     audit = {
         "subject_checks": [

@@ -1,5 +1,7 @@
 # image-agent
 
+> 2026-10-18 图片交付规则：主图、三张详情图及白底图达到 `ExecutionPolicy.max_quality_repairs`（默认 2，首次生成不计入）或预算/审核/修复终止后，自动返回全部可读取最终候选中综合分最高的一张。同分优先较早候选，无评分则选较早可用图；中间场景图不作为最终图。`status=succeeded` 表示可交付，`quality.passed` 保留真实审核结果；`delivery.mode=best_available` 记录选中候选、评分、摘要及停止原因，警告随结果保留。所有原候选保留。`graph_runtime.recover_best_available(run_dir)` 仅显式恢复已结束原任务，不调用模型。独立长图流程维持原契约。
+
 <p align="center">
   <img src="./assets/readme/hero.svg" width="100%" alt="image-agent：从真实商品素材开始电商图片创作，提供 Windows 工作台、CLI 与 Python API">
 </p>
@@ -16,7 +18,17 @@
 
 [快速上手](#快速上手) · [命令行](#命令行) · [Python 接入](#python-接入) · [技术参考](#技术参考) · [开发与验收](#开发与验收)
 
+## HTTP 服务与 MySQL 配置
+
+可选 HTTP 服务提供配置管理、图片上传、异步素材分析和图片生成、结果下载、显式恢复与人工接受。安装 `image-agent[server]`，将 `server.config.example.json` 复制为 `server.config.json` 并填写数据库连接、Token、加密密钥与数据目录，显式执行数据库迁移后运行 `uv run python -m image_agent.server`（可用 `--config` 指定配置文件）；默认监听 `127.0.0.1:8000`。采用单服务进程，MySQL 保存配置与任务元数据，受控磁盘目录保存图片和核心运行记录。
+
+在线文档：[Swagger UI](http://127.0.0.1:8000/docs)、[ReDoc](http://127.0.0.1:8000/redoc)、[OpenAPI JSON](http://127.0.0.1:8000/openapi.json)。文档公开浏览；业务请求要求 Bearer Token。详见[完整安装、调用与恢复说明](docs/http-api.md)。现有 CLI、桌面和 Python API 继续使用原配置入口。
+
+Windows 配置与迁移完成后，双击 [start-webapi.cmd](start-webapi.cmd) 一键启动；按 `Ctrl+C` 停止，启动失败时窗口会保留错误信息。
+
 ## AI 补齐商品创作方案
+
+创作流程已移除独立事实校验：不会要求模型逐条返回 `fact_checks`，也不会因其缺项或低分拦截生成、触发修复。素材分析的 `facts`、`identity_fact_ids` 和 `fact_ids` 同样仅作可选创作参考；空值、缺项、失效关联或不可用的事实注释会被忽略，不伪造事实，不因此重试模型或阻塞生成。事实证明不足、可信度和事实可验证性不再作为任务门槛；事实视角超过参考图名额时，优先使用商品原图并在剩余名额内补充视角，特写可直接从原图选择裁切。继续检查商品主体选择、外观一致性、指定文案、画面质量及尺寸；用户提供的卖点和营销表述直接作为创作输入。历史结果中的事实检查字段仅兼容读取，新结果不再导出。
 
 主图、详情图、白底图和商品长图共用同一原则：用户提供真实商品图片及已知信息，模型负责补齐必要的创作规划。风格、构图、光线、内容组织或规划结构缺失时，校验结果用于指导模型修复，不要求用户理解内部字段或提供专业设计方案。
 
@@ -58,7 +70,7 @@ long_asset = next(a for a in result.assets if a.output_type == "long_image")
 
 默认 `750 / 6 / 3:4`，通常约 750×6000；高度按实际区段缩放后求和，参考图的 6153 高度不强制复现。宽度范围 400–2400，区段数 3–12，比例支持 `3:4 / 4:5 / 9:16`；已知信息最多 12000 字符，必须文案最多 30 条，每条 1–500 字符且不能全为空白。成品最多 60000 高且不超过 6000 万像素，连续切片高 1500（末片可更短）。这些参数只影响长图，普通图片仍沿用其比例和数量规则。
 
-每平台交付一个 `Asset(output_type="long_image", variant=None)`，与普通输出在同一商品 `CreationResult` 和目录中。逐段外观与文案审核、原始响应、候选、计划、提示词和切片均保留；完整整图仅在所有区段像素齐全后交付，失败审核会保留真实失败状态。中间段为 `stage` 候选，不能被当作成品接受。恢复使用现有 `resume_images`，人工接受使用 `accept_candidate`：已保存段不重复生成，响应未记录的提交保持 `generation_uncertain`，审核或本地拼接重试不会重提已保存图片。
+每平台交付一个 `Asset(output_type="long_image", variant=None)`，与普通输出在同一商品 `CreationResult` 和目录中。逐段外观与文案审核、原始响应、候选、计划、提示词和切片均保留；完整整图仅在所有区段像素齐全后交付。所有图片（主图、详情图、白底图和商品长图）统一遵循修复耗尽后最高分交付：长图逐段从已有可读候选按同一综合分选优再拼接，有评分优先、同分较早、无评分选较早可用图；完整长图分数为各有评分区段分数的平均值。失败审核保留真实状态和警告，不再阻止完整候选交付。中间段为 `stage` 候选，不能被当作成品接受。恢复使用现有 `resume_images`，人工接受使用 `accept_candidate`：已保存段不重复生成，响应未记录的提交保持 `generation_uncertain`，审核或本地拼接重试不会重提已保存图片。
 
 `CreationRequestDTO.long_image` 使用同一可选 options，仍为 `schema_version=1.0`；旧请求缺少该字段仍可读取。最终整图继续通过 `result_to_bundle` 导出 blob，段及切片的本地路径不会进入外部 DTO。视觉模型文案审核不是确定性 OCR，离线测试也不能证明真实供应商的中文和商品一致性达到参考图质量。
 

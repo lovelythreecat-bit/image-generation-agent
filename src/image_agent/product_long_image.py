@@ -35,7 +35,7 @@ def selected_product_evidence(context):
         closed_ids = [fid for fid in element.fact_ids if fid in allowed_fact_ids]
         # A mixed element's free-text description can mention its foreign product too.
         # Drop the contaminated element as a whole rather than forwarding that description.
-        if closed_ids and len(closed_ids) == len(element.fact_ids):
+        if len(closed_ids) == len(element.fact_ids):
             filtered_elements.append(element.model_copy(update={"fact_ids": closed_ids}))
     return {
         "subjects": [s.model_dump() for s in subjects],
@@ -594,78 +594,19 @@ class ProductLongImageWorkflow:
             self.advance(state)
 
     async def compose(self, state):
-        import copy
         from functools import partial
 
-        from .errors import AgentError, make_error_info
-        from .product_long_image_render import compose_product_long_image
+        from .product_long_image_delivery import compose_best_sections
         from .transport import compute
 
         nodes = self.nodes
         asset = nodes.asset(state)
         runtime = self.runtime(state)
-        if not all(s["candidates"] for s in runtime["segments"]):
-            raise AgentError(
-                "missing required product long-image section", kind="output", code="output_error"
-            )
-        runtime["resume_phase"] = "long_compose"
-        full, slices, boundaries = await compute(
-            partial(compose_product_long_image, width=nodes.request.long_image.width),
-            [nodes.store.read(s["candidates"][-1]["ref"]) for s in runtime["segments"]],
-        )
-        final_number = 1 + sum(c["status"] != "stage" for c in asset.candidates)
-        candidate_id = f"full{final_number:04d}"
-        ref = nodes.store.write(f"candidates/{asset.asset_id}/{candidate_id}.png", full)
-        slice_refs = [
-            nodes.store.write(f"slices/{asset.asset_id}/{candidate_id}-{i + 1:03d}.png", data)
-            for i, data in enumerate(slices)
-        ]
-        statuses = [s["status"] for s in runtime["segments"]]
-        status = next(
-            (
-                s
-                for s in ("budget_exhausted", "audit_error", "pending_audit", "quality_failed")
-                if s in statuses
-            ),
-            "succeeded",
-        )
-        info = (
-            None
-            if status == "succeeded"
-            else make_error_info(
-                AgentError(
-                    "one or more complete sections failed physical/copy review",
-                    kind="quality",
-                    code=status,
-                )
-            )
-        )
-        metadata = {
-            "plan": copy.deepcopy(runtime["plan"]),
-            "plan_ref": runtime["plan_ref"],
-            "segments": copy.deepcopy(runtime["segments"]),
-            "boundaries": boundaries,
-            "slices": slice_refs,
-            "width": nodes.request.long_image.width,
-            "height": sum(b["height"] for b in boundaries),
-            "audit_method": "per-section physical and visual-model copy audits; not deterministic OCR",
-        }
-        asset.candidates.append(
-            {
-                "candidate_id": candidate_id,
-                "index": len(asset.candidates) + 1,
-                "status": status,
-                "file_path": ref["path"],
-                "sha256": ref["sha256"],
-                "quality": None,
-                "error_info": info.model_dump(mode="json") if info else None,
-                "repair_prompt": "",
-                "metadata": metadata,
-            }
-        )
-        asset.status, asset.file_path, asset.quality = status, ref["path"], None
-        asset.error_info, asset.error = info, info.message if info else None
-        asset.stop_reason = status if info else None
-        runtime.pop("resume_phase", None)
+        runtime['resume_phase'] = 'long_compose'
+        await compute(partial(
+            compose_best_sections, asset, nodes.target(state), runtime, nodes.store,
+            nodes.request.long_image.width,
+        ))
+        runtime.pop('resume_phase', None)
         nodes.update_asset(state, asset)
-        state["phase"] = "finish_asset"
+        state['phase'] = 'finish_asset'

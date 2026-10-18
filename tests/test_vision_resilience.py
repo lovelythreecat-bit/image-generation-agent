@@ -106,14 +106,14 @@ async def test_schema_failure_is_corrected_once_with_same_images_and_field_diagn
 
 async def test_repeated_schema_failure_is_bounded_and_names_stage_and_fields():
     bad = audit_data()
-    del bad["fact_checks"]
+    del bad["subject_checks"]
     transport = RawTransport([{"content": json.dumps(bad)}] * 3)
     with pytest.raises(ProviderError) as error:
         await VisionClient(transport, AgentConfig())._call(
             GeneratedImageAudit, "audit", [], stage="audit_image"
         )
     assert len(transport.calls) == 2
-    assert "audit_image" in error.value.message and "fact_checks" in error.value.message
+    assert "audit_image" in error.value.message and "subject_checks" in error.value.message
     assert "missing" in error.value.message
 
 

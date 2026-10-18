@@ -51,8 +51,9 @@ def test_targets_order_and_white_override(request_data):
         )
     )
     targets = build_targets(r, resolve_presentation(r))
-    assert len(targets) == 9
+    assert len(targets) == 10
     assert [t.variant for t in targets[2:5]] == ["scene", "feature", "closeup"]
+    assert [t.platform for t in targets[-2:]] == ["taobao", "pinduoduo"]
     assert targets[-1].presentation_mode == "product_only"
     assert targets[-1].model_preference == "auto"
     assert (

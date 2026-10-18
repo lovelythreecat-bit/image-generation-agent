@@ -196,7 +196,7 @@ def build_targets(request, presentation_mode):
         if output not in request.output_types:
             continue
         white = output == "pdd_white_background"
-        for platform in ["pinduoduo"] if white else request.platforms:
+        for platform in request.platforms:
             for variant in ["scene", "feature", "closeup"] if output == "detail_page" else [None]:
                 targets.append(
                     AssetTarget(
@@ -309,7 +309,9 @@ def build_prompt(request, target, context, plan, mode="standard"):
         parts.append(
             "SOURCE-SUPPORTED CLOSE-UP FOCUS: Crop tightly into the following visible "
             "source-product appearance. Keep other identity details only where visible in "
-            "the crop; do not reveal unsupported surfaces or invent finer detail.\n"
+            "the crop; do not reveal unsupported surfaces or invent finer detail. "
+            "If no fact annotations follow, choose a tight crop directly from the selected "
+            "source product image; fact annotations are optional.\n"
             + json.dumps(
                 [f.model_dump() for f in context.analysis.facts if f.fact_id in focus_ids],
                 ensure_ascii=False,
@@ -405,7 +407,7 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
     failures = []
     preserve = []
     for requirement in plan.requirements:
-        if requirement.applicability == "not_applicable":
+        if requirement.target_kind == "fact" or requirement.applicability == "not_applicable":
             continue
         kind = requirement.target_kind
         checks = getattr(quality, kind + "_checks")
@@ -418,7 +420,7 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
                 "if the angle exposes unsupported surfaces, return to a source-supported view "
                 "instead of guessing their construction. Retain natural folds, lighting and separate scene decorations."
             )
-        elif kind in ("fact", "element"):
+        elif kind == "element":
             failed = requirement.origin != "preferred" and (
                 (requirement.applicability == "must_show" and check.presence != "present")
                 or (check.presence == "present" and check.fidelity_score < 85)
@@ -439,7 +441,7 @@ def build_repair_prompt(request, target, context, plan, quality, *, previous_pro
         if failed:
             row.update(action=action, requirement=requirement.model_dump())
             failures.append(row)
-        elif kind not in ("fact", "element") or check.presence == "present":
+        elif kind != "element" or check.presence == "present":
             preserve.append(row)
     metrics = [
         (

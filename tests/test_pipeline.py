@@ -69,9 +69,10 @@ async def test_quality_service_failure_no_creative_retry(request_data):
         request_data, scores={"main": [ProviderError("timeout", kind="transport")]}
     )
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert result.status == "audit_error" and len(gen.calls) == 1
+    assert result.status == "succeeded" and len(gen.calls) == 1
     assert result.assets[0].image == picture((1600, 1600))
-    assert result.assets[0].error_info.retryable
+    assert result.assets[0].candidates[0]['error_info']['retryable']
+    assert result.assets[0].delivery.score is None
     assert result.error_info is None
 
 
@@ -90,16 +91,19 @@ async def test_audit_protocol_failure_preserves_candidate_and_saved_manifest(
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
     saved = await save_result(result, tmp_path)
     asset = saved.assets[0]
-    assert saved.status == asset.status == "audit_error"
+    assert saved.status == asset.status == "succeeded"
     assert len(gen.calls) == 1 and asset.image == picture((1600, 1600))
     assert (tmp_path / "candidates/taobao.main_image.default/c0001.png").read_bytes() == asset.image
     assert not (tmp_path / "taobao/main_image.png").exists()
     manifest = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
-    assert manifest["assets"][0]["file_path"] == "candidates/taobao.main_image.default/c0001.png"
-    assert manifest["assets"][0]["status"] == "audit_error"
+    assert manifest['assets'][0]['file_path'] == 'candidates/taobao.main_image.default/c0001.png'
+    assert manifest['assets'][0]['delivery']['candidate_id'] == 'c0001'
+    assert manifest['assets'][0]['status'] == 'succeeded'
+    assert manifest['assets'][0]['candidates'][0]['status'] == 'audit_error'
     bundle = result_to_bundle(saved)
     assert bundle.blobs[asset.asset_id] == asset.image
-    assert bundle.dto.assets[0].status == "audit_error" and bundle.dto.assets[0].quality is None
+    assert bundle.dto.assets[0].status == 'succeeded' and bundle.dto.assets[0].quality is None
+    assert bundle.dto.assets[0].delivery.score is None
 
 
 async def test_snapshot_recovery_and_stale_detection(request_data):

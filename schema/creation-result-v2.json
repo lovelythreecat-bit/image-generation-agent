@@ -42,6 +42,28 @@
           "title": "Status",
           "type": "string"
         },
+        "delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BestAvailableDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "long_image_review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LongImageReview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "blob_id": {
           "anyOf": [
             {
@@ -332,6 +354,52 @@
       "title": "AssetElementPlan",
       "type": "object"
     },
+    "BestAvailableDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "best_available",
+          "default": "best_available",
+          "title": "Mode",
+          "type": "string"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "stop_reason": {
+          "title": "Stop Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "sha256",
+        "stop_reason"
+      ],
+      "title": "BestAvailableDelivery",
+      "type": "object"
+    },
     "CandidateDTO": {
       "additionalProperties": false,
       "description": "Review metadata only; local storage references never cross the DTO boundary.",
@@ -602,7 +670,6 @@
             "pattern": "^[A-Za-z0-9_-]{1,64}$",
             "type": "string"
           },
-          "minItems": 1,
           "title": "Fact Ids",
           "type": "array"
         }
@@ -611,8 +678,7 @@
         "element_id",
         "kind",
         "subject_id",
-        "description",
-        "fact_ids"
+        "description"
       ],
       "title": "Element",
       "type": "object"
@@ -819,50 +885,6 @@
         "confidence"
       ],
       "title": "Fact",
-      "type": "object"
-    },
-    "FactCheck": {
-      "additionalProperties": false,
-      "properties": {
-        "presence": {
-          "enum": [
-            "present",
-            "absent",
-            "not_applicable"
-          ],
-          "title": "Presence",
-          "type": "string"
-        },
-        "fidelity_score": {
-          "anyOf": [
-            {
-              "maximum": 100,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Fidelity Score"
-        },
-        "reason": {
-          "title": "Reason",
-          "type": "string"
-        },
-        "fact_id": {
-          "pattern": "^[A-Za-z0-9_-]{1,64}$",
-          "title": "Fact Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "presence",
-        "fidelity_score",
-        "reason",
-        "fact_id"
-      ],
-      "title": "FactCheck",
       "type": "object"
     },
     "GenerationAttempt": {
@@ -1156,6 +1178,134 @@
       "title": "IssueOption",
       "type": "object"
     },
+    "LongImageReview": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "width": {
+          "maximum": 2400,
+          "minimum": 400,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "maximum": 60000,
+          "minimum": 1,
+          "title": "Height",
+          "type": "integer"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/LongImageSectionReview"
+          },
+          "maxItems": 12,
+          "minItems": 3,
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "sha256",
+        "width",
+        "height",
+        "sections"
+      ],
+      "title": "LongImageReview",
+      "type": "object"
+    },
+    "LongImageSectionReview": {
+      "additionalProperties": false,
+      "description": "Public review of a complete section, with no local storage references.",
+      "properties": {
+        "section_id": {
+          "minLength": 1,
+          "title": "Section Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "pending_audit",
+            "audit_error",
+            "quality_failed",
+            "needs_input",
+            "budget_exhausted",
+            "accepted",
+            "generation_uncertain"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "copy_audit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProductLongImageCopyAudit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BestAvailableDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "y": {
+          "minimum": 0,
+          "title": "Y",
+          "type": "integer"
+        },
+        "width": {
+          "minimum": 1,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "minimum": 1,
+          "title": "Height",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "section_id",
+        "status",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "LongImageSectionReview",
+      "type": "object"
+    },
     "MaterialAnalysis": {
       "additionalProperties": false,
       "properties": {
@@ -1264,7 +1414,6 @@
         "status",
         "materials",
         "subjects",
-        "facts",
         "elements",
         "intent"
       ],
@@ -1386,6 +1535,43 @@
       "title": "ProductInputAudit",
       "type": "object"
     },
+    "ProductLongImageCopyAudit": {
+      "additionalProperties": false,
+      "properties": {
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "text_matches": {
+          "title": "Text Matches",
+          "type": "boolean"
+        },
+        "no_invented_claims": {
+          "title": "No Invented Claims",
+          "type": "boolean"
+        },
+        "layout_readable": {
+          "title": "Layout Readable",
+          "type": "boolean"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "passed",
+        "text_matches",
+        "no_invented_claims",
+        "layout_readable"
+      ],
+      "title": "ProductLongImageCopyAudit",
+      "type": "object"
+    },
     "QualityReport": {
       "additionalProperties": false,
       "properties": {
@@ -1394,13 +1580,6 @@
             "$ref": "#/$defs/SubjectCheck"
           },
           "title": "Subject Checks",
-          "type": "array"
-        },
-        "fact_checks": {
-          "items": {
-            "$ref": "#/$defs/FactCheck"
-          },
-          "title": "Fact Checks",
           "type": "array"
         },
         "element_checks": {
@@ -1506,7 +1685,6 @@
       },
       "required": [
         "subject_checks",
-        "fact_checks",
         "element_checks",
         "constraint_checks",
         "visual_quality",
@@ -1777,7 +1955,6 @@
             "pattern": "^[A-Za-z0-9_-]{1,64}$",
             "type": "string"
           },
-          "minItems": 1,
           "title": "Identity Fact Ids",
           "type": "array"
         },
@@ -1794,7 +1971,6 @@
       "required": [
         "subject_id",
         "material_ids",
-        "identity_fact_ids",
         "representative_material_id",
         "matches_product"
       ],

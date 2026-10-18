@@ -30,17 +30,17 @@ def test_published_error_contract_accepts_recorded_stage():
     assert "stage" not in schema["required"]
 
 
-def test_validation_error_explains_incompatible_white_background(tmp_path):
+def test_validation_error_explains_blank_category(tmp_path):
     with pytest.raises(ValidationError) as caught:
         build_request(
             [tmp_path / "private.png"],
             product_name="cup",
-            category="home",
+            category=" ",
             platforms=["taobao"],
             output_types=["detail_page", "pdd_white_background"],
         )
     info = make_error_info(caught.value)
-    assert "white background requires pinduoduo" in info.message
+    assert "must not be blank" in info.message
     assert not info.message.startswith(":")
     assert "private.png" not in info.message
     assert info.kind == "validation" and not info.retryable

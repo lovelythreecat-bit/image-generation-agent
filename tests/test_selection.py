@@ -66,14 +66,14 @@ def test_fact_or_and_coverage_and_audit_union(request_data):
         )
     )
     data["subjects"][0]["identity_fact_ids"].append("back")
-    with pytest.raises(ProviderError) as error:
-        compile_element_plan(
-            r,
-            build_targets(r, "product_only")[0],
-            context(r, data),
-            AgentConfig(generation_reference_limit=1),
-        )
-    assert error.value.code == "reference_capacity_exceeded"
+    plan = compile_element_plan(
+        r,
+        build_targets(r, "product_only")[0],
+        context(r, data),
+        AgentConfig(generation_reference_limit=1),
+    )
+    assert plan.generation_material_ids == ["m1"]
+    assert "m2" in plan.audit_material_ids
 
 
 def test_optional_scene_white_excluded_required_conflicts(request_data):

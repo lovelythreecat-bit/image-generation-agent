@@ -23,6 +23,8 @@ from .prompt import is_apparel, strict_catalog
 
 RULE_VERSION = "multi-image-r4-original-input-creative-boundary"
 
+FACT_PROOF_ISSUE_CODES = frozenset({"missing_evidence", "low_confidence", "unverifiable_claim"})
+
 # A deliberately small set from the discovery planning policy. This recognizes
 # generic aesthetic requests, not general semantic equivalence or user intent.
 GENERIC_ATMOSPHERE_CUES = {
@@ -265,53 +267,13 @@ def resolve_selection(request, analysis):
         if s.subject_id in args["subject_ids"]
         for mid in s.material_ids
     }
-    claim_facts = {
-        f.fact_id for f in analysis.facts if f.effective_verifiability == "functional_claim"
-    }
-    claim_elements = {e.element_id for e in analysis.elements if set(e.fact_ids) <= claim_facts}
-    required_elements = set(args["required_element_ids"])
-    required_elements.update(
-        e for c in analysis.intent.constraints if c.priority == "required" for e in c.element_ids
-    )
-    critical_facts = {
-        f
-        for s in analysis.subjects
-        if s.subject_id in args["subject_ids"]
-        for f in s.identity_fact_ids
-    }
-    critical_facts.update(
-        f for e in analysis.elements if e.element_id in required_elements for f in e.fact_ids
-    )
     for issue in analysis.issues + analysis.intent.unmet_requirements:
-        optional = bool(issue.element_ids or issue.fact_ids) and not (
-            set(issue.element_ids) & required_elements
-            or set(issue.fact_ids) & critical_facts
-            or any(
-                set(e.fact_ids) & critical_facts
-                for e in analysis.elements
-                if e.element_id in issue.element_ids
-            )
-        )
-        if issue.code == "low_confidence" or (optional and issue.code == "missing_evidence"):
+        if issue.code in FACT_PROOF_ISSUE_CODES:
             draft.issue_resolutions.append(
                 IssueResolution(
                     issue_id=issue.issue_id,
                     status="irrelevant",
-                    reason="可信度或可选细节不足，采用素材支持的视角或裁切并保留警告",
-                )
-            )
-            continue
-        if (
-            (issue.fact_ids or issue.element_ids)
-            and set(issue.fact_ids) <= claim_facts
-            and set(issue.element_ids) <= claim_elements
-            and issue.code in ("missing_evidence", "low_confidence", "unverifiable_claim")
-        ):
-            draft.issue_resolutions.append(
-                IssueResolution(
-                    issue_id=issue.issue_id,
-                    status="irrelevant",
-                    reason="营销声明直接用于创作，无需事实证明",
+                    reason="事实证据仅作创作参考，不阻塞任务；继续使用商品原图",
                 )
             )
             continue
@@ -350,38 +312,6 @@ def resolve_selection(request, analysis):
             )
         else:
             draft.pending_issues.append(issue)
-    required_facts = {
-        f
-        for s in analysis.subjects
-        if s.subject_id in args["subject_ids"]
-        for f in s.identity_fact_ids
-    }
-    required_elements = set(args["required_element_ids"])
-    required_elements.update(
-        e
-        for c in analysis.intent.constraints
-        if c.priority == "required" and c.kind != "exclusion"
-        for e in c.element_ids
-    )
-    required_facts.update(
-        f for e in analysis.elements if e.element_id in required_elements for f in e.fact_ids
-    )
-    for fact in analysis.facts:
-        if fact.fact_id not in required_facts:
-            continue
-        if fact.effective_verifiability == "functional_claim":
-            continue
-        if fact.effective_verifiability == "unverified":
-            draft.blocking_issues.append(
-                Issue(
-                    issue_id="evidence-" + fact.fact_id[:48],
-                    code="missing_evidence",
-                    resolution="reanalyze",
-                    message="必需外观缺少直接可验证证据，请补充素材并重新分析",
-                    fact_ids=[fact.fact_id],
-                )
-            )
-            continue
     return draft
 
 
@@ -411,19 +341,22 @@ def finalize_selection(draft, evidence=None):
         raise ProviderError("missing or invalid evidence issue resolutions")
     resolutions += evidence.issue_resolutions
     mismatch = any(not s.same_product for s in evidence.subject_checks)
-    if evidence.outcome == "failed" or mismatch:
+    fact_only = bool(evidence.issues) and all(
+        i.code in FACT_PROOF_ISSUE_CODES for i in evidence.issues
+    )
+    if (evidence.outcome == "failed" and not fact_only) or mismatch:
         return SelectionResolution(
             status="failed",
             selection=draft.candidate,
             issue_resolutions=resolutions,
-            error_info=ErrorInfo(
-                code="input_mismatch", kind="input", message="所选商品或事实与素材不符"
-            ),
+            error_info=ErrorInfo(code="input_mismatch", kind="input", message="所选商品与素材不符"),
         )
     unresolved = {r.issue_id for r in evidence.issue_resolutions if r.status == "unresolved"}
-    valid = evidence.intent_valid and all(f.presence == "present" for f in evidence.fact_checks)
-    issues = [i for i in draft.pending_issues if i.issue_id in unresolved] + evidence.issues
-    if evidence.outcome != "verified" or not valid or unresolved or issues:
+    valid = evidence.intent_valid
+    issues = [i for i in draft.pending_issues if i.issue_id in unresolved] + [
+        i for i in evidence.issues if i.code not in FACT_PROOF_ISSUE_CODES
+    ]
+    if (evidence.outcome != "verified" and not fact_only) or not valid or unresolved or issues:
         if not issues:
             issues = [
                 Issue(
@@ -455,7 +388,7 @@ def compile_element_plan(request, target, context, config):
     facts_by_id = {f.fact_id: f for f in analysis.facts}
 
     def claim_only(eid):
-        return all(
+        return bool(elements[eid].fact_ids) and all(
             facts_by_id[fid].effective_verifiability == "functional_claim"
             for fid in elements[eid].fact_ids
         )
@@ -500,12 +433,16 @@ def compile_element_plan(request, target, context, config):
         native_style = (
             element.kind == "style"
             and element.subject_id is not None
-            and all(
-                facts_by_id[fid].effective_verifiability == "visible_appearance"
-                and any(
-                    e.source_type in ("visual", "product_label") for e in facts_by_id[fid].evidence
+            and (
+                not element.fact_ids
+                or all(
+                    facts_by_id[fid].effective_verifiability == "visible_appearance"
+                    and any(
+                        e.source_type in ("visual", "product_label")
+                        for e in facts_by_id[fid].evidence
+                    )
+                    for fid in element.fact_ids
                 )
-                for fid in element.fact_ids
             )
         )
         return element.kind in ("scene", "style") and not native_style and not claim_only(eid)
@@ -554,10 +491,8 @@ def compile_element_plan(request, target, context, config):
             )
         ]
         focus_fact = max(candidates, key=lambda fact: fact.confidence, default=None)
-    if target.variant == "closeup" and focus is None and focus_fact is None:
-        _conflict("特写缺少可信的焦点细节")
-    cropped = target.variant in ("feature", "closeup") and (
-        focus is not None or focus_fact is not None
+    cropped = target.variant == "closeup" or (
+        target.variant == "feature" and (focus is not None or focus_fact is not None)
     )
     focus_subject = elements[focus].subject_id if focus else selection.primary_subject_id
     visible = (
@@ -566,16 +501,7 @@ def compile_element_plan(request, target, context, config):
         else ({focus_subject} if focus_subject else {selection.primary_subject_id})
         | required_subjects
     )
-    user_facts = {
-        f
-        for e in required
-        for f in elements[e].fact_ids
-        if facts_by_id[f].effective_verifiability != "functional_claim"
-    }
-    if target.variant == "closeup" and (
-        not user_facts <= (set(elements[focus].fact_ids) if focus else {focus_fact.fact_id})
-        or len(visible) > 1
-    ):
+    if target.variant == "closeup" and len(visible) > 1:
         _conflict("微距无法同时呈现每资产必需对象或细节")
     if target.output_type == "pdd_white_background" and len(visible) > 1:
         _conflict("白底单件规则不支持多个必需主体")
@@ -763,15 +689,18 @@ def _populate_references(plan, analysis, materials, limit, *, legacy=False):
     def evidence(fid):
         return {e.material_id for e in facts[fid].evidence}
 
-    for fid in plan.required_fact_ids:
-        if not set(chosen) & evidence(fid):
-            chosen.append(next(mid for mid in ordered if mid in evidence(fid)))
     if len(chosen) > limit:
         raise ProviderError(
             "required evidence exceeds generation reference capacity",
             kind="capability",
             code="reference_capacity_exceeded",
         )
+    # Fact views are optional references, never a proof-capacity gate.
+    for fid in plan.required_fact_ids:
+        if len(chosen) < limit and not set(chosen) & evidence(fid):
+            mid = next((m for m in ordered if m in evidence(fid)), None)
+            if mid:
+                chosen.append(mid)
     optional = sorted(
         plan.preferred_element_ids,
         key=lambda e: (

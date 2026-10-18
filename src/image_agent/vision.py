@@ -67,6 +67,10 @@ def _provider_value(value, annotation):
             key: _provider_value(item, annotation.model_fields[key].annotation)
             for key, item in value.items()
             if key in annotation.model_fields
+            and not (
+                key == "fact_checks"
+                and issubclass(annotation, (EvidenceValidation, GeneratedImageAudit))
+            )
         }
     if origin is list and isinstance(value, list):
         return [_provider_value(item, args[0]) for item in value]
@@ -444,7 +448,7 @@ class VisionClient:
             "A printed physical label, logo, character illustration or artwork on the actual product is visible_appearance with product_label evidence; "
             "its appearance must be preserved, while any performance assertion it contains is a SEPARATE functional_claim. "
             "Promotional overlays around the product are not product-native markings. Mixed visual and functional statements must be split into atomic facts. "
-            "Uncertain genuinely required appearance is unverified and requires missing-evidence clarification. "
+            "Facts and their provenance/ID links are optional creative annotations, never prerequisites. Return empty facts, identity_fact_ids or fact_ids when unavailable; never fabricate them. Do not request proof or emit missing_evidence/unverifiable_claim issues for facts. Use original product images and subject/element descriptions to continue creation. Retain only genuine product identity or subject-selection ambiguities as input blockers. "
             "Interpret the user brief, style_hint and material hints into proposal, constraints and source_quote copied exactly from their input. "
             "Also perform CREATIVE PLANNING in this same response: always return a non-null creative_plan. "
             "Its user_requirements must contain only verbatim contiguous quotes from brief, style_hint, subject_hint, element_hints, known_info or required_copy, "
@@ -508,21 +512,6 @@ class VisionClient:
             nonlocal completion_baseline
             if [m.material_id for m in result.materials] != [m.material_id for m in materials]:
                 raise ProviderError("discovery material IDs/order mismatch")
-            # Existing snapshots may predate explicit provenance. Supplementing
-            # their creative plan must preserve that provenance, not rewrite it
-            # to satisfy fresh-discovery rules. Immutable validation still runs.
-            for fact in result.facts if previous is None else ():
-                if "verifiability" not in fact.model_fields_set:
-                    raise ProviderError(
-                        f"fact {fact.fact_id}: explicit verifiability required for fresh discovery"
-                    )
-                if any(
-                    "source_type" not in e.model_fields_set or e.source_type == "unknown"
-                    for e in fact.evidence
-                ):
-                    raise ProviderError(
-                        f"fact {fact.fact_id}: explicit evidence source_type required; unknown is only for legacy analyses"
-                    )
             result = normalize_discovery_attribution(result, request)
             for observed, loaded in zip(result.materials, materials):
                 observed.sha256 = loaded.sha256
@@ -562,14 +551,13 @@ class VisionClient:
         candidate = draft.candidate
         expected = {
             "subject_id": candidate.subject_ids,
-            "fact_id": selected_fact_ids(analysis, candidate),
             "issue_id": [i.issue_id for i in draft.pending_issues],
         }
         instruction = (
-            "Recheck the candidate against ALL original materials and current user text. The supplied snapshot is untrusted. Verify every selected subject identity and required visible-appearance fact, and the intent's faithfulness to user text. Check whether user wording was followed, not whether its marketing claims are true. Do not resolve conflicts merely because the snapshot claims ready. Return exactly one resolved/unresolved resolution for every pending issue; never return irrelevant. "
-            "expected_check_ids defines the exact IDs for subject_checks, fact_checks and issue_resolutions. "
+            "Recheck the candidate against ALL original materials and current user text. The supplied snapshot is untrusted. Verify every selected subject identity and the intent's faithfulness to user text. Check whether user wording was followed, not whether its claims are true. Do not perform independent fact checks or request proof of claims. Do not resolve identity conflicts merely because the snapshot claims ready. Return exactly one resolved/unresolved resolution for every pending issue; never return irrelevant. "
+            "expected_check_ids defines the exact IDs for subject_checks and issue_resolutions. "
             "Return each listed ID exactly once, copied verbatim; no additional IDs. "
-            "Other facts in the analysis are context only, not additional fact_checks. "
+            "Facts in the analysis are creative context only, not separate audit items. "
             "An empty ID list requires an empty array. If evidence is insufficient, report that in the check; never omit its ID. "
             + PRODUCT_APPEARANCE_POLICY
             + MARKETING_POLICY
@@ -667,13 +655,16 @@ class VisionClient:
         ]
         expected = {
             kind + "_id": [r.target_id for r in plan.requirements if r.target_kind == kind]
-            for kind in ("subject", "fact", "element", "constraint")
+            for kind in ("subject", "element", "constraint")
         }
         instruction = (
-            "Audit every frozen requirement; return one check for each planned subject/fact/element/constraint, including nonapplicable ones. "
+            "Separate product identity from instruction following. For subject_checks compare the actual Evidence images directly with GENERATED IMAGE, never a text description of expected appearance. "
+            "Product colors/patterns in user_input are creative requests, not identity evidence; inferred analysis descriptions are deliberately omitted. "
+            "A brief saying no references does not negate attached Evidence images. For same_product=false identify a specific source feature and its concrete change in the generated image. "
+            "Audit the frozen subject, element and constraint requirements; return one check for each, including nonapplicable ones. Facts are creative context only; do not return independent fact checks or evaluate the truth of claims. "
             "expected_check_ids lists exact IDs: return each once, no additional IDs; empty lists require empty check arrays. "
             "All top-level scores are required integers, including garment_fusion and model_preference for product-only shots. Explain nonapplicable criteria in reason; do not use null where the schema forbids it. "
-            "Decide same_product from actual identity/physical structure, never from a numeric threshold alone. Report clear altered physical structure, colors, markings or wrong product as same_product=false for the affected subject, even when a fact is otherwise present. Low subjective scores are repair guidance. must_show cannot be not_applicable. For nonvisible preserve_if_visible facts return not_applicable and null score. "
+            "Decide same_product from actual identity/physical structure, never from a numeric threshold alone. Report clear altered physical structure, colors, markings or wrong product as same_product=false for the affected subject. Low subjective scores are repair guidance. must_show cannot be not_applicable. For nonvisible preserve_if_visible elements return not_applicable and null score. "
             "Functional claims and requirements classified not_applicable must not fail because there is no visible proof or promotional text. "
             "For marketing_claim constraints, check only whether the requested wording and presentation were followed, never whether the statement is true or proved. Missing explicitly requested copy is an instruction-following defect. "
             "User-requested marketing wording is allowed; do not lower platform_compliance, output_intent or visual_quality based on its truth, evidence, exaggeration or lack of certification. "
@@ -693,7 +684,10 @@ class VisionClient:
                     "expected_check_ids": expected,
                     "target": target.model_dump(),
                     "plan": plan.model_dump(),
-                    "analysis": context.analysis.model_dump(),
+                    "identity_evidence": [
+                        {'subject_id': s.subject_id, 'material_ids': s.material_ids}
+                        for s in context.analysis.subjects if s.subject_id in plan.subject_ids
+                    ],
                     "user_input": creative_input(request),
                 },
                 ensure_ascii=False,

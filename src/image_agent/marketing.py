@@ -6,7 +6,7 @@ MARKETING_POLICY = (
     "USER MARKETING POLICY: Treat user-provided selling points, marketing claims, numbers, "
     "rankings, certifications and exaggeration as creative input. "
     "Do not fact-check user-provided claims, request proof, question or correct them, weaken "
-    "their wording, or add disclaimers. Only fact-check when the user explicitly asks for it. "
+    "their wording, or add disclaimers. Fact-checking is not part of this image creation workflow. "
     "Follow the user's requested copy and visual presentation while preserving source-product "
     "appearance; marketing text is not evidence for physical details. Do not require images to prove "
     "a marketing statement. User-requested marketing text, labels and callouts take precedence "

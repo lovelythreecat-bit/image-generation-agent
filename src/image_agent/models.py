@@ -1,11 +1,21 @@
 """Validated runtime contracts; importing this module has no I/O side effects."""
 
+import copy
 import re
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic.json_schema import SkipJsonSchema
 
 from .sanitization import redact
 
@@ -202,8 +212,6 @@ class CreationRequest(Model):
             raise ValueError("at least one material required")
         if "materials" in self.model_fields_set and not self.materials:
             raise ValueError("materials must contain 1–8 items")
-        if "pdd_white_background" in self.output_types and "pinduoduo" not in self.platforms:
-            raise ValueError("white background requires pinduoduo")
         if self.market is None:
             p = self.platforms[0]
             object.__setattr__(
@@ -290,7 +298,7 @@ class Fact(Model):
 class Subject(Model):
     subject_id: Id
     material_ids: list[Id] = Field(min_length=1)
-    identity_fact_ids: list[Id] = Field(min_length=1)
+    identity_fact_ids: list[Id] = Field(default_factory=list)
     representative_material_id: Id
     matches_product: StrictBool
 
@@ -300,7 +308,7 @@ class Element(Model):
     kind: Literal["identity", "detail", "accessory", "scene", "style"]
     subject_id: Id | None
     description: str = Field(min_length=1)
-    fact_ids: list[Id] = Field(min_length=1)
+    fact_ids: list[Id] = Field(default_factory=list)
 
 
 class SelectionProposal(Model):
@@ -377,13 +385,79 @@ class MaterialAnalysis(Model):
     status: Literal["ready", "needs_input", "failed"]
     materials: list[MaterialObservation]
     subjects: list[Subject]
-    facts: list[Fact]
+    facts: list[Fact] = Field(default_factory=list)
     elements: list[Element]
     intent: IntentAnalysis | None
     creative_plan: CreativePlan | None = None
     issues: list[Issue] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error_info: ErrorInfo | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def optional_fact_context(cls, value):
+        """Discard unusable optional annotations; never invent facts or source IDs."""
+        if not isinstance(value, dict):
+            return value
+        data = copy.deepcopy(value)
+
+        def field(row, name, default=None):
+            return row.get(name, default) if isinstance(row, dict) else getattr(row, name, default)
+
+        materials = {field(m, "material_id") for m in data.get("materials", [])}
+        subjects = {
+            field(s, "subject_id"): set(field(s, "material_ids", []))
+            for s in data.get("subjects", [])
+        }
+        facts = {}
+        supplied = data.get("facts")
+        for row in supplied if isinstance(supplied, list) else []:
+            try:
+                fact = row if isinstance(row, Fact) else Fact.model_validate(row)
+            except ValidationError:
+                continue
+            sources = {e.material_id for e in fact.evidence}
+            if (
+                fact.fact_id not in facts
+                and sources <= materials
+                and (
+                    fact.subject_id is None
+                    or fact.subject_id in subjects
+                    and sources <= subjects[fact.subject_id]
+                )
+            ):
+                facts[fact.fact_id] = fact
+        data["facts"] = list(facts.values())
+
+        def links(row, name, *, subject_id=None):
+            original = field(row, name)
+            cleaned = (
+                list(
+                    dict.fromkeys(
+                        fid
+                        for fid in original
+                        if isinstance(fid, str)
+                        and fid in facts
+                        and (subject_id is None or facts[fid].subject_id == subject_id)
+                    )
+                )
+                if isinstance(original, list)
+                else []
+            )
+            if isinstance(row, dict):
+                row[name] = cleaned
+            else:
+                setattr(row, name, cleaned)
+
+        for subject in data.get("subjects", []):
+            links(subject, "identity_fact_ids", subject_id=field(subject, "subject_id"))
+        for element in data.get("elements", []):
+            links(element, "fact_ids", subject_id=field(element, "subject_id"))
+        intent = data.get("intent")
+        issues = list(data.get("issues", [])) + list(field(intent, "unmet_requirements", []))
+        for issue in issues:
+            links(issue, "fact_ids")
+        return data
 
     @model_validator(mode="after")
     def references(self):
@@ -568,7 +642,8 @@ class ConstraintCheck(Model):
 class EvidenceValidation(Model):
     outcome: Literal["verified", "needs_input", "failed"]
     subject_checks: list[SubjectCheck]
-    fact_checks: list[FactCheck]
+    # Read historical results without requesting or exporting retired checks.
+    fact_checks: SkipJsonSchema[list[FactCheck]] = Field(default_factory=list, exclude=True)
     intent_valid: StrictBool
     issue_resolutions: list[IssueResolution]
     issues: list[Issue] = Field(default_factory=list)
@@ -671,7 +746,7 @@ class PixelChecks(Model):
 
 class GeneratedImageAudit(Model):
     subject_checks: list[SubjectCheck]
-    fact_checks: list[FactCheck]
+    fact_checks: SkipJsonSchema[list[FactCheck]] = Field(default_factory=list, exclude=True)
     element_checks: list[ElementCheck]
     constraint_checks: list[ConstraintCheck]
     visual_quality: Score
@@ -735,12 +810,21 @@ class GenerationAttempt(Model):
     error_info: ErrorInfo | None = None
 
 
+class BestAvailableDelivery(Model):
+    mode: Literal['best_available'] = 'best_available'
+    candidate_id: str = Field(min_length=1)
+    score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    stop_reason: str
+
+
 class Asset(Model):
     asset_id: str
     platform: str
     output_type: str
     variant: str | None = None
     status: AssetStatus
+    delivery: BestAvailableDelivery | None = None
     candidates: list[dict] = Field(default_factory=list)
     stop_reason: str | None = None
     image: bytes | None = Field(default=None, repr=False, exclude=True)

@@ -1,0 +1,13 @@
+{
+  "database_url": "mysql+asyncmy://app_user:replace-with-db-password@127.0.0.1:3306/image_agent?charset=utf8mb4",
+  "token": "replace-with-long-random-token",
+  "secret_key": "replace-with-generated-fernet-key",
+  "data_dir": "./server-data",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "worker_concurrency": 1,
+  "queue_capacity": 100,
+  "root_path": "",
+  "max_upload_bytes": 20971520,
+  "max_image_pixels": 60000000
+}

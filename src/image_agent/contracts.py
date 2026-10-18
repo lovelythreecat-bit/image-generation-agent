@@ -1,5 +1,6 @@
 """Versioned external JSON DTOs and explicit media binding; no storage framework."""
 
+import hashlib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -10,6 +11,7 @@ from .images import image_format
 from .models import (
     AssetElementPlan,
     AssetStatus,
+    BestAvailableDelivery,
     CreationRequest,
     CreationResult,
     DetailSetAudit,
@@ -31,6 +33,7 @@ from .models import (
     SelectionSpec,
     normalize_string_list,
 )
+from .product_long_image_models import ProductLongImageCopyAudit
 
 
 class MaterialDTO(Model):
@@ -98,12 +101,34 @@ class CandidateDTO(Model):
     repair_prompt: str | None = None
 
 
+class LongImageSectionReview(Model):
+    """Public review of a complete section, with no local storage references."""
+    section_id: str = Field(min_length=1)
+    status: AssetStatus
+    quality: QualityReport | None = None
+    copy_audit: ProductLongImageCopyAudit | None = None
+    delivery: BestAvailableDelivery | None = None
+    y: int = Field(strict=True, ge=0)
+    width: int = Field(strict=True, ge=1)
+    height: int = Field(strict=True, ge=1)
+
+
+class LongImageReview(Model):
+    candidate_id: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    width: int = Field(strict=True, ge=400, le=2400)
+    height: int = Field(strict=True, ge=1, le=60000)
+    sections: list[LongImageSectionReview] = Field(min_length=3, max_length=12)
+
+
 class AssetDTO(Model):
     asset_id: str
     platform: str
     output_type: str
     variant: str | None = None
     status: AssetStatus
+    delivery: BestAvailableDelivery | None = None
+    long_image_review: LongImageReview | None = None
     blob_id: str | None = None
     mime_type: str | None = None
     byte_length: int | None = None
@@ -164,6 +189,36 @@ def request_from_dto(dto: CreationRequestDTO, sources: dict[str, ImageSource]) -
     )
 
 
+def _long_image_review(asset):
+    if asset.output_type != "long_image" or asset.image is None:
+        return None
+    digest = hashlib.sha256(asset.image).hexdigest()
+    chosen_id = (asset.delivery.candidate_id if asset.delivery else
+                 next((c['candidate_id'] for c in asset.candidates if c.get('selected')), None))
+    for candidate in reversed(asset.candidates):
+        if chosen_id is not None and candidate['candidate_id'] != chosen_id:
+            continue
+        if candidate.get("status") == "stage" or candidate.get("sha256") != digest:
+            continue
+        metadata = candidate.get("metadata") or {}
+        segments, boundaries = metadata.get("segments"), metadata.get("boundaries")
+        if not isinstance(segments, list) or not isinstance(boundaries, list):
+            continue
+        if len(segments) != len(boundaries):
+            continue
+        return LongImageReview(
+            candidate_id=candidate["candidate_id"], sha256=digest,
+            width=metadata["width"], height=metadata["height"],
+            sections=[LongImageSectionReview(
+                section_id=section["section_id"], status=section["status"],
+                quality=section.get("quality"), copy_audit=section.get("copy_audit"),
+                delivery=section.get('delivery'),
+                y=boundary["y"], width=boundary["width"], height=boundary["height"],
+            ) for section, boundary in zip(segments, boundaries, strict=True)],
+        )
+    return None
+
+
 def result_to_bundle(result: CreationResult) -> ResultBundle:
     blobs = {}
     assets = []
@@ -187,6 +242,7 @@ def result_to_bundle(result: CreationResult) -> ResultBundle:
                 mime_type=image_format(asset.image)[1],
                 byte_length=len(asset.image),
             )
+        data["long_image_review"] = _long_image_review(asset)
         assets.append(AssetDTO(**data))
     dto = CreationResultDTO(**result.model_dump(exclude={"assets", "run_dir"}), assets=assets)
     return ResultBundle(dto=dto, blobs=blobs)

@@ -292,7 +292,7 @@ def generation_instruction(
 ) -> str:
     if output_type == "pdd_white_background":
         return (
-            "Pinduoduo WHITE-BACKGROUND image rules: use a pure white background and exactly one "
+            "WHITE-BACKGROUND image rules: use a pure white background and exactly one "
             "sellable product as the sole subject. Show the complete product from the front, centered "
             "and filling the frame without a white margin. Use a flat-lay or clean product-only "
             "presentation with no model, person, scene, prop, hanger, product tag, logo, watermark, "

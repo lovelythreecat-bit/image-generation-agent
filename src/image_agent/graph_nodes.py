@@ -6,6 +6,7 @@ import inspect
 from pydantic import ValidationError
 
 from .compliance import apply_compliance
+from .delivery import delivery_warning, select_best_available
 from .errors import AgentError, ProviderError, make_error_info
 from .execution import call_scope
 from .images import generated_image, image_format
@@ -106,10 +107,26 @@ class GraphNodes:
         await self.long_workflow.plan(state)
 
     async def long_generate(self, state):
-        await self.long_workflow.generate(state)
+        try:
+            await self.long_workflow.generate(state)
+        except AgentError as error:
+            self.fallback_long_section(state, error, 'long_generate')
+
+    def fallback_long_section(self, state, error, stage):
+        _, segment = self.long_workflow.current(state)
+        if not segment['candidates']:
+            raise error
+        info = make_error_info(error, stage=stage)
+        segment.update(status='generation_uncertain' if info.code == 'generation_uncertain'
+                       else 'budget_exhausted' if info.code == 'budget_exhausted'
+                       else 'audit_error', error_info=info.model_dump(mode='json'))
+        self.long_workflow.advance(state)
 
     async def long_save_candidate(self, state):
-        await self.long_workflow.save_candidate(state)
+        try:
+            await self.long_workflow.save_candidate(state)
+        except AgentError as error:
+            self.fallback_long_section(state, error, 'long_save_candidate')
 
     async def long_audit(self, state):
         await self.long_workflow.audit(state)
@@ -506,7 +523,7 @@ class GraphNodes:
                 "output_intent",
             )
         }
-        for key in ("subject_checks", "fact_checks", "element_checks", "constraint_checks"):
+        for key in ("subject_checks", "element_checks", "constraint_checks"):
             failures[key] = [
                 {k: v for k, v in row.items() if k != "reason"} for row in quality[key]
             ]
@@ -526,7 +543,7 @@ class GraphNodes:
             (quality.get("model_reason") or quality.get("reason") or "").casefold().split()
         )
         failed_text = " ".join(quality["failed_checks"])
-        for kind in ("subject", "fact", "element", "constraint"):
+        for kind in ("subject", "element", "constraint"):
             failures[kind + "_evidence"] = {
                 row[kind + "_id"]: " ".join(row["reason"].casefold().split())
                 for row in quality[kind + "_checks"]
@@ -578,15 +595,20 @@ class GraphNodes:
 
     async def finish_asset(self, state):
         asset = self.asset(state)
+        if asset.status not in ('succeeded', 'accepted'):
+            selected = select_best_available(asset, self.target(state), self.candidate_bytes)
+            if selected is not None:
+                state['result']['warnings'].append(delivery_warning(asset))
         if asset.status == "succeeded":
-            candidate = next(c for c in reversed(asset.candidates) if c["status"] == "succeeded")
+            candidate = next((c for c in asset.candidates if c.get('selected')), None)
+            candidate = candidate or next(c for c in reversed(asset.candidates) if c['status'] == 'succeeded')
             data = self.candidate_bytes(candidate)
+            bucket = 'delivered' if asset.delivery else 'approved'
             ref = self.store.write(
-                f"approved/{asset.platform}/{asset.output_type}/{asset.variant or 'default'}{image_format(data)[0]}",
+                f"{bucket}/{asset.platform}/{asset.output_type}/{asset.variant or 'default'}{image_format(data)[0]}",
                 data,
             )
-            state.setdefault("cleanup", []).append(candidate["file_path"])
-            asset.file_path = candidate["file_path"] = ref["path"]
+            asset.file_path = ref['path']
             candidate["selected"] = True
             target = self.target(state)
             if "detail_page" in self.request.output_types and (
@@ -698,7 +720,7 @@ class GraphNodes:
                         tuple(
                             self.candidate_bytes(
                                 next(
-                                    c for c in reversed(a.candidates) if c["status"] == "succeeded"
+                                    c for c in a.candidates if c.get('selected')
                                 )
                             )
                             for a in detail

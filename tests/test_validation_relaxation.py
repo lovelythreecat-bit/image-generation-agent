@@ -139,7 +139,7 @@ async def test_surplus_image_and_product_checks_need_one_provider_call(request_d
     client = VisionClient(transport, AgentConfig())
     result = await client.audit_image(request, target(), ctx, p, picture())
     assert [s.subject_id for s in result.subject_checks] == ["s1"]
-    assert "f2" not in [f.fact_id for f in result.fact_checks]
+    assert "fact_checks" not in result.model_dump()
     review = await client.review_product(ctx, p, ["s1"], picture())
     assert len(review.subject_checks) == 1 and len(transport.calls) == 2
 
@@ -206,7 +206,7 @@ async def test_injected_evidence_surplus_discarded_and_missing_still_fails(reque
 
     async def extra(*args):
         value = await original(*args)
-        value.fact_checks.append(value.fact_checks[0].model_copy(update={"fact_id": "f2"}))
+        value.subject_checks.append(value.subject_checks[0].model_copy(update={"subject_id": "s2"}))
         value.issue_resolutions.append(
             value.issue_resolutions[0].model_copy(update={"issue_id": "extra"})
         )
@@ -219,7 +219,7 @@ async def test_injected_evidence_surplus_discarded_and_missing_still_fails(reque
     assert ctx is not None
 
     async def missing(*args):
-        return (await original(*args)).model_copy(update={"fact_checks": []})
+        return (await original(*args)).model_copy(update={"subject_checks": []})
 
     vision.validate_evidence = missing
     ctx, result = await prepare_context(
@@ -451,7 +451,7 @@ def test_natural_language_fidelity_uncertainty_is_not_clear_structure_mismatch()
     q = evaluate_quality(
         value, PixelChecks(passed=True, width=800, height=800, reason="ok"), target(), p
     )
-    assert not q.passed and not q.critical_failed_checks
+    assert q.passed and not q.critical_failed_checks
 
 
 def test_focused_review_wrong_product_remains_a_critical_finding():

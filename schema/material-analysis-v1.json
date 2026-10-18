@@ -103,7 +103,6 @@
             "pattern": "^[A-Za-z0-9_-]{1,64}$",
             "type": "string"
           },
-          "minItems": 1,
           "title": "Fact Ids",
           "type": "array"
         }
@@ -112,8 +111,7 @@
         "element_id",
         "kind",
         "subject_id",
-        "description",
-        "fact_ids"
+        "description"
       ],
       "title": "Element",
       "type": "object"
@@ -677,7 +675,6 @@
             "pattern": "^[A-Za-z0-9_-]{1,64}$",
             "type": "string"
           },
-          "minItems": 1,
           "title": "Identity Fact Ids",
           "type": "array"
         },
@@ -694,7 +691,6 @@
       "required": [
         "subject_id",
         "material_ids",
-        "identity_fact_ids",
         "representative_material_id",
         "matches_product"
       ],
@@ -809,7 +805,6 @@
     "status",
     "materials",
     "subjects",
-    "facts",
     "elements",
     "intent"
   ],

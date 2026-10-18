@@ -111,7 +111,7 @@ def review_subject_ids(audit, plan):
 def evaluate_quality(audit, pixels, target, plan, *, review=None):
     requirements = {
         kind: [r for r in plan.requirements if r.target_kind == kind]
-        for kind in ("subject", "fact", "element", "constraint")
+        for kind in ("subject", "element", "constraint")
     }
     audit = normalize_audit_checks(
         audit, {f"{kind}_id": [r.target_id for r in rows] for kind, rows in requirements.items()}
@@ -134,19 +134,18 @@ def evaluate_quality(audit, pixels, target, plan, *, review=None):
             failed.append(f"商品一致性 {s.subject_id} {s.score}<85或身份不符")
             if not s.same_product:
                 critical.append(failed[-1])
-    for kind in ("fact", "element"):
-        lookup = {getattr(c, f"{kind}_id"): c for c in getattr(audit, f"{kind}_checks")}
-        for r in requirements[kind]:
-            c = lookup[r.target_id]
-            if r.origin == "preferred" or r.applicability == "not_applicable":
-                continue
-            if r.applicability == "must_show" and c.presence != "present":
-                failed.append(f"必需要素 {r.target_id} 未呈现")
-                critical.append(failed[-1])
-            elif c.presence == "present" and c.fidelity_score < 85:
-                failed.append(f"要素保真 {r.target_id} {c.fidelity_score}<85")
-                # Clear physical changes must be reported as same_product=false;
-                # a fidelity score and prose alone do not establish that finding.
+    lookup = {c.element_id: c for c in audit.element_checks}
+    for r in requirements["element"]:
+        c = lookup[r.target_id]
+        if r.origin == "preferred" or r.applicability == "not_applicable":
+            continue
+        if r.applicability == "must_show" and c.presence != "present":
+            failed.append(f"必需要素 {r.target_id} 未呈现")
+            critical.append(failed[-1])
+        elif c.presence == "present" and c.fidelity_score < 85:
+            failed.append(f"要素保真 {r.target_id} {c.fidelity_score}<85")
+            # Clear physical changes must be reported as same_product=false;
+            # a fidelity score and prose alone do not establish that finding.
     checks = {c.constraint_id: c for c in audit.constraint_checks}
     for r in requirements["constraint"]:
         if r.applicability == "must_show" and not checks[r.target_id].satisfied:

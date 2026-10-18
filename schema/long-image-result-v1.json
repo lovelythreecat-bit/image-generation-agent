@@ -135,50 +135,6 @@
       "title": "ErrorInfo",
       "type": "object"
     },
-    "FactCheck": {
-      "additionalProperties": false,
-      "properties": {
-        "presence": {
-          "enum": [
-            "present",
-            "absent",
-            "not_applicable"
-          ],
-          "title": "Presence",
-          "type": "string"
-        },
-        "fidelity_score": {
-          "anyOf": [
-            {
-              "maximum": 100,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Fidelity Score"
-        },
-        "reason": {
-          "title": "Reason",
-          "type": "string"
-        },
-        "fact_id": {
-          "pattern": "^[A-Za-z0-9_-]{1,64}$",
-          "title": "Fact Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "presence",
-        "fidelity_score",
-        "reason",
-        "fact_id"
-      ],
-      "title": "FactCheck",
-      "type": "object"
-    },
     "IntentConstraint": {
       "additionalProperties": false,
       "properties": {
@@ -1468,13 +1424,6 @@
           "title": "Subject Checks",
           "type": "array"
         },
-        "fact_checks": {
-          "items": {
-            "$ref": "#/$defs/FactCheck"
-          },
-          "title": "Fact Checks",
-          "type": "array"
-        },
         "element_checks": {
           "items": {
             "$ref": "#/$defs/ElementCheck"
@@ -1578,7 +1527,6 @@
       },
       "required": [
         "subject_checks",
-        "fact_checks",
         "element_checks",
         "constraint_checks",
         "visual_quality",

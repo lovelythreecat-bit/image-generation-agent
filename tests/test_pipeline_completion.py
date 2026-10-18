@@ -128,7 +128,7 @@ async def test_explicit_snapshot_keeps_selection_and_rechecks(request_data):
     assert result.analysis.analysis_id == snapshot.analysis_id
 
 
-@pytest.mark.parametrize("code", ["conflicting_identity", "ambiguous_subject", "missing_evidence"])
+@pytest.mark.parametrize("code", ["conflicting_identity", "ambiguous_subject"])
 async def test_identity_or_required_appearance_gaps_stay_honest(request_data, code):
     data = analysis_data()
     data.update(status="needs_input", creative_plan=creative_plan())
@@ -287,7 +287,7 @@ async def test_persistent_evidence_creative_gap_is_bounded_provider_failure(requ
     assert vision.calls == ["discover", "evidence", "complete", "evidence"]
 
 
-async def test_evidence_real_missing_appearance_is_never_creatively_repaired(request_data):
+async def test_fact_proof_review_continues_without_creative_repair(request_data):
     vision = EvidenceGapVision(code="missing_evidence")
     request, deps, _ = setup_completion(request_data, vision)
     prepared = await prepare_analysis(request, AgentConfig(), deps)
@@ -295,7 +295,7 @@ async def test_evidence_real_missing_appearance_is_never_creatively_repaired(req
     context, result = await prepare_context(
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
-    assert context is None and result.status == "needs_input"
+    assert context is not None
     assert vision.calls == ["discover", "evidence"]
 
 

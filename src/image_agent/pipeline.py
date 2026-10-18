@@ -37,7 +37,7 @@ from .selection import (
     resolve_selection,
 )
 from .transport import HttpTransport, compute
-from .vision import VisionClient, selected_fact_ids
+from .vision import VisionClient
 
 
 class VisionProtocol(Protocol):
@@ -181,7 +181,6 @@ async def _selection_evidence(request, prepared, draft, dependencies, config, *,
         evidence,
         {
             "subject_id": draft.candidate.subject_ids,
-            "fact_id": selected_fact_ids(prepared.analysis, draft.candidate),
             "issue_id": [i.issue_id for i in draft.pending_issues],
         },
     )

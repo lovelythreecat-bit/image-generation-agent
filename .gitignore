@@ -26,3 +26,7 @@ examples/密钥.md
 *.pyc
 *.pyo
 /build/
+
+# Local HTTP deployment credentials and image/task storage
+/server.config.json
+/server-data/

@@ -32,7 +32,6 @@ from .selection import (
     resolve_selection,
     select_references,
 )
-from .vision import selected_fact_ids
 
 
 @dataclass(frozen=True)
@@ -164,7 +163,6 @@ async def _review_product_evidence(adapter, materials, analysis, draft, vision):
     evidence = await vision.validate_evidence(adapter, materials, analysis, draft)
     expected = {
         "subject_id": draft.candidate.subject_ids,
-        "fact_id": selected_fact_ids(analysis, draft.candidate),
         "issue_id": [i.issue_id for i in draft.pending_issues],
     }
     for key, ids in expected.items():

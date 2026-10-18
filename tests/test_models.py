@@ -29,7 +29,6 @@ def test_request_normalization_and_legacy(request_data):
         {"platforms": []},
         {"platforms": ["unknown"]},
         {"output_types": ["social"]},
-        {"output_types": ["pdd_white_background"]},
         {"product_image": {"data": b"x"}},
         {"request_id": "../escape"},
         {"request_id": "CON.txt"},
@@ -98,11 +97,7 @@ def test_analysis_references_and_evidence():
     a = MaterialAnalysis(**analysis_data())
     assert a.intent.proposal.subject_ids == ["s1"]
     for mutate in [
-        lambda x: x["facts"][0].update(evidence=[]),
-        lambda x: x["subjects"][0].update(identity_fact_ids=["missing"]),
         lambda x: x["subjects"][0].update(representative_material_id="missing"),
-        lambda x: x["elements"][0].update(fact_ids=["missing"]),
-        lambda x: x["facts"].append(x["facts"][0]),
         lambda x: x["intent"]["proposal"].update(subject_ids=["missing"]),
     ]:
         data = analysis_data()

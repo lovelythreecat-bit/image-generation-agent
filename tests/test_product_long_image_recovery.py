@@ -98,11 +98,14 @@ async def test_audit_error_final_resumes_only_errored_sections(request_data, tmp
     result = await run_pipeline(
         request, AgentConfig(), dependencies=deps, policy=ExecutionPolicy(max_audit_retries=0)
     )
-    assert result.status == "audit_error" and result.assets[0].image and len(gen.calls) == 6
+    assert result.status == "succeeded" and result.assets[0].image and len(gen.calls) == 6
+    assert result.assets[0].delivery and result.warnings
+    audits_before = len(vision.calls)
     vision.audit_product_long_image_copy = original
     resumed = await resume_pipeline(result.run_dir, AgentConfig(), dependencies=deps)
     assert resumed.status == "succeeded" and len(gen.calls) == 6
     assert resumed.usage["image_calls"] == result.usage["image_calls"]
+    assert len(vision.calls) == audits_before
 
 
 async def test_local_composition_failure_retries_without_generation(

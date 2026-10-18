@@ -348,7 +348,7 @@ async def test_product_and_generic_audits_are_separate(tmp_path):
         [a.error_info for a in result.image_assets],
     )
     assert result.image_assets[0].audit.deterministic_checks.passed
-    assert result.image_assets[0].audit.fact_checks[0].fact_id == "f1"
+    assert "fact_checks" not in result.image_assets[0].audit.model_dump()
     assert len(transport.posts) == 2
     assert "expected_check_ids" in json.dumps(transport.posts[1][1])
     assert result.usage.execution == {"image_calls": 1, "vision_calls": 1}
