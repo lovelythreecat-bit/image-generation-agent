@@ -87,6 +87,24 @@ def test_serve_uses_default_or_explicit_file_and_cli_overrides(
     assert settings.port == (8234 if "--port" in arguments else 8123)
     assert options["host"] == ("127.0.0.1" if "--host" in arguments else "0.0.0.0")
     assert options["workers"] == 1
+    import sys
+
+    assert options['loop'] == ('image_agent.server.event_loop:selector_loop_factory'
+                               if sys.platform == 'win32' else 'auto')
+
+
+def test_uvicorn_loads_buffered_protocol_compatible_event_loop():
+    import asyncio
+
+    from uvicorn import Config
+
+    factory = Config('unused:app',
+        loop='image_agent.server.event_loop:selector_loop_factory').get_loop_factory()
+    loop = factory()
+    try:
+        assert isinstance(loop, asyncio.SelectorEventLoop)
+    finally:
+        loop.close()
 
 
 def test_cli_missing_file_reports_actionable_error_without_environment_fallback(

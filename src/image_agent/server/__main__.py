@@ -61,7 +61,9 @@ def main(argv=None):
             if overrides:
                 settings = replace(settings, **overrides)
             uvicorn.run(create_app(settings), host=settings.host, port=settings.port,
-                        workers=1, access_log=False)
+                        workers=1, access_log=False,
+                        loop=('image_agent.server.event_loop:selector_loop_factory'
+                              if sys.platform == 'win32' else 'auto'))
         return 0
     except ServerError as exc:
         print(json.dumps({"code": exc.code, "message": "服务命令执行失败；请检查配置与数据库状态"},
