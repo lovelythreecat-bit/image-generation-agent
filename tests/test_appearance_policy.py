@@ -138,7 +138,7 @@ async def test_vision_boundaries_keep_appearance_separate_from_copy(request_data
 async def test_reported_invented_detail_uses_existing_repair_without_rechecking_claims(
     request_data,
 ):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_pipeline import setup
 
     request, deps, vision, generator = setup(

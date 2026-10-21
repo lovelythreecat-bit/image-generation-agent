@@ -9,7 +9,7 @@ from tests.test_pipeline import setup
 async def test_saved_candidate_audit_resume_never_generates(request_data, tmp_path):
     from image_agent.execution import ExecutionPolicy
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, scores={"main": [ProviderError("bad audit")]})
@@ -33,7 +33,7 @@ async def test_saved_candidate_audit_resume_never_generates(request_data, tmp_pa
 async def test_candidates_exist_before_audit_and_repairs_retained(request_data, tmp_path):
     from pathlib import Path
 
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, scores={"main": [{"output_intent": 74}, {}]})
@@ -57,7 +57,7 @@ async def test_input_copy_integrity_and_config_validation(request_data, tmp_path
 
     from image_agent.execution import ExecutionPolicy
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, scores={"main": [ProviderError("bad audit")]})
@@ -109,7 +109,7 @@ async def test_cancelled_generation_pauses_uncertain_without_replay(request_data
     import asyncio
 
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, error=asyncio.CancelledError())
@@ -126,7 +126,7 @@ async def test_cancel_after_candidate_save_resumes_only_audit(request_data, tmp_
     import asyncio
 
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data)
@@ -179,7 +179,7 @@ def test_shared_budget_across_runs_is_atomic_and_cannot_reset(tmp_path):
 async def test_success_promotes_candidate_away_from_failed_directory(request_data, tmp_path):
     from pathlib import Path
 
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, scores={"main": [{"output_intent": 50}, {}]})
@@ -194,7 +194,8 @@ async def test_success_promotes_candidate_away_from_failed_directory(request_dat
 
 async def test_accept_older_candidate_survives_resume_with_exact_image(request_data, tmp_path):
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import accept_candidate, run_pipeline
+    from image_agent.pipeline import accept_candidate
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_images import picture
 
     request_data["output_dir"] = tmp_path
@@ -249,7 +250,7 @@ async def test_image_timeout_is_uncertain_and_does_not_retry(tmp_path):
 
 async def test_memory_run_later_export_preserves_all_candidate_history(request_data, tmp_path):
     from image_agent.output import save_result
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request, deps, vision, gen = setup(request_data, scores={"main": [{"output_intent": 50}, {}]})
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
@@ -267,7 +268,7 @@ async def test_resume_refuses_damaged_budget_ledger(request_data, tmp_path, dama
 
     from image_agent.execution import ExecutionPolicy, reserve_post
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, scores={"main": [ProviderError("bad audit")]})
@@ -317,7 +318,7 @@ def test_shared_ledger_cannot_be_recreated_after_deletion(tmp_path):
 
 
 async def test_same_scores_with_new_actionable_audit_evidence_get_repair(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request, deps, vision, gen = setup(
         request_data,
@@ -359,7 +360,7 @@ async def test_uncertain_submission_cannot_replay_when_journal_is_lost(
 
     from image_agent.execution import reserve_post
     from image_agent.graph_runtime import resume_pipeline
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_dir"] = tmp_path
     request, deps, vision, gen = setup(request_data, error=asyncio.CancelledError())

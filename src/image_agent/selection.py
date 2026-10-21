@@ -25,6 +25,13 @@ RULE_VERSION = "multi-image-r4-original-input-creative-boundary"
 
 FACT_PROOF_ISSUE_CODES = frozenset({"missing_evidence", "low_confidence", "unverifiable_claim"})
 
+MATERIAL_REVIEW_ISSUE_CODES = FACT_PROOF_ISSUE_CODES | {
+    "conflicting_identity",
+    "input_mismatch",
+    "product_mismatch",
+    "ambiguous_subject",
+}
+
 # A deliberately small set from the discovery planning policy. This recognizes
 # generic aesthetic requests, not general semantic equivalence or user intent.
 GENERIC_ATMOSPHERE_CUES = {
@@ -268,12 +275,14 @@ def resolve_selection(request, analysis):
         for mid in s.material_ids
     }
     for issue in analysis.issues + analysis.intent.unmet_requirements:
-        if issue.code in FACT_PROOF_ISSUE_CODES:
+        if (
+            issue.code in MATERIAL_REVIEW_ISSUE_CODES and issue.resolution != "selection"
+        ) or issue.resolution == "recheck":
             draft.issue_resolutions.append(
                 IssueResolution(
                     issue_id=issue.issue_id,
                     status="irrelevant",
-                    reason="事实证据仅作创作参考，不阻塞任务；继续使用商品原图",
+                    reason="素材提示仅供参考，继续使用原图：" + issue.message,
                 )
             )
             continue
@@ -307,7 +316,7 @@ def resolve_selection(request, analysis):
                 IssueResolution(
                     issue_id=issue.issue_id,
                     status="resolved",
-                    reason="已显式选择唯一候选，快照仍需复核",
+                    reason="已显式选择唯一候选",
                 )
             )
         else:

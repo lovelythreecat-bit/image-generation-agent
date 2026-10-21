@@ -4,11 +4,11 @@ import pytest
 
 from image_agent.config import AgentConfig
 from image_agent.models import CreationRequest, MaterialAnalysis
-from image_agent.pipeline import run_pipeline
 from image_agent.prompt import build_targets
 from image_agent.selection import compile_element_plan, finalize_selection, resolve_selection
 from image_agent.vision import VisionClient
 from tests.fakes import analysis_data
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_pipeline import setup
 from tests.test_selection import context, multi_view_data
 from tests.test_vision import ScriptTransport, materials

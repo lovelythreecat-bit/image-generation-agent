@@ -186,7 +186,9 @@ async def resume_pipeline(run_dir, config, *, dependencies, on_progress=None):
         metadata = store.load_metadata(config)
         state = store.json("state.json")
         store.validate_candidates(state)
-        policy = ExecutionPolicy.model_validate(metadata["policy"])
+        policy = ExecutionPolicy.model_validate(
+            {"review_generated_images": True, **metadata["policy"]}
+        )
         check = BudgetLedger(store.directory / "budget.sqlite", policy, require_existing=True)
         try:
             store.validate_operations(check)

@@ -133,7 +133,7 @@ async def test_repeated_visual_planning_gap_exhausts_existing_completion_limit()
     assert len(transport.payloads) == 4
 
 
-async def test_visual_gap_does_not_complete_over_existing_source_identity_blocker():
+async def test_visual_gap_retries_even_with_legacy_material_review_warning():
     from image_agent.long_image_vision import LongImageVisionClient
     from image_agent.models import MaterialAnalysis
     from tests.fakes import analysis_data
@@ -169,12 +169,11 @@ async def test_visual_gap_does_not_complete_over_existing_source_identity_blocke
         ],
     }
     transport = Transport([draft] * 4)
-    result = await LongImageVisionClient(transport, AgentConfig()).plan(
-        request, materials, collect_text_requirements(request), analysis=source
-    )
-    assert result.status == "needs_input" and result.analysis == source
-    assert result.analysis.issues[0].issue_id == "physical"
-    assert len(transport.payloads) == 1
+    with pytest.raises(ProviderError, match="attempt=4/4"):
+        await LongImageVisionClient(transport, AgentConfig()).plan(
+            request, materials, collect_text_requirements(request), analysis=source
+        )
+    assert len(transport.payloads) == 4
 
 
 def png():

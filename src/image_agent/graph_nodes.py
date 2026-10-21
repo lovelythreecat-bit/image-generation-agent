@@ -13,6 +13,7 @@ from .images import generated_image, image_format
 from .models import (
     Asset,
     AssetTarget,
+    BestAvailableDelivery,
     CreationResult,
     DetailSetAudit,
     GenerationAttempt,
@@ -453,6 +454,14 @@ class GraphNodes:
             asset.status, asset.file_path = "pending_audit", ref["path"]
             asset.quality, asset.error_info, asset.error, asset.stop_reason = None, None, None, None
             state.update(phase="audit", audit_attempts=0)
+            if not self.policy.review_generated_images:
+                candidate.update(status="succeeded", selected=True)
+                asset.status = "succeeded"
+                asset.delivery = BestAvailableDelivery(
+                    mode="direct", candidate_id=candidate_id, sha256=ref["sha256"],
+                    stop_reason="generation_completed",
+                )
+                state["phase"] = "finish_asset"
         self.update_asset(state, asset)
         state["raw"] = None
 
@@ -638,17 +647,18 @@ class GraphNodes:
             key: state.get(key)
             for key in ("repairs", "stage", "scene", "previous_failures", "shoot_anchor")
         }
+        terminal_phase = "group_audit" if self.policy.review_generated_images else "finish"
         queue = state.get("resume_queue")
         if queue:
             state["index"] = queue.pop(0)
             state.update(state.get("asset_runtime", {}).get(str(state["index"]), {}))
             state.update(phase=self.resume_audit_phase(state), audit_attempts=0)
         elif queue is not None:
-            state["phase"] = "group_audit"
+            state["phase"] = terminal_phase
         else:
             state["index"] += 1
             state["phase"] = (
-                "prepare_asset" if state["index"] < len(state["targets"]) else "group_audit"
+                "prepare_asset" if state["index"] < len(state["targets"]) else terminal_phase
             )
 
     def resume_audit_phase(self, state):
@@ -666,6 +676,9 @@ class GraphNodes:
         return "long_compose"
 
     async def group_audit(self, state):
+        if not self.policy.review_generated_images:
+            state["phase"] = "finish"
+            return
         result, context = self.result(state), self.context(state)
         existing = {audit.platform: audit for audit in result.detail_set_audits}
         for platform in self.request.platforms:

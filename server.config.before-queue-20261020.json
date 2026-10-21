@@ -1,0 +1,13 @@
+{
+  "database_url": "mysql+asyncmy://root:wiscom123%21@127.0.0.1:3306/image_agent?charset=utf8mb4",
+  "token": "EZGMpqf1e1sVkGTb_75lbhauZ3kIyeYlSp8zd4A-Y8E",
+  "secret_key": "x3kJ09JjhQfgT2dRprOY4VrjPZqDSAcv2pLoQIYKdQg=",
+  "data_dir": "./server-data",
+  "host": "127.0.0.1",
+  "port": 9000,
+  "worker_concurrency": 1,
+  "queue_capacity": 100,
+  "root_path": "",
+  "max_upload_bytes": 20971520,
+  "max_image_pixels": 60000000
+}

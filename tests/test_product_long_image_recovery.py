@@ -8,8 +8,8 @@ from image_agent.config import AgentConfig
 from image_agent.errors import AgentError, OutputError, ProviderError
 from image_agent.execution import ExecutionPolicy
 from image_agent.graph_runtime import resume_pipeline
-from image_agent.pipeline import run_pipeline
 from image_agent.run_store import RunStore
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_product_long_image_pipeline import long_setup
 
 

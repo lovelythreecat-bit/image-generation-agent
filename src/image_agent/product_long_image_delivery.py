@@ -31,7 +31,8 @@ def select_sections(segments, target, store):
             if quality is not None and copy is not None:
                 section['status'] = ('succeeded' if quality['passed'] and copy['passed']
                                      else 'quality_failed')
-            elif section['status'] == 'succeeded':
+            elif (section['status'] == 'succeeded'
+                  and (section.get('delivery') or {}).get('mode') != 'direct'):
                 section['status'] = 'pending_audit'
             section['selected_candidate_id'] = candidate['candidate_id']
             if original['status'] != 'succeeded':
@@ -71,7 +72,9 @@ def compose_best_sections(asset, target, runtime, store, width):
         'plan': deepcopy(runtime['plan']), 'plan_ref': runtime['plan_ref'],
         'segments': segments, 'boundaries': boundaries, 'slices': slice_refs,
         'width': width, 'height': sum(b['height'] for b in boundaries),
-        'audit_method': 'per-section physical and visual-model copy audits; not deterministic OCR',
+        'audit_method': ('not_performed' if all(
+            (s.get('delivery') or {}).get('mode') == 'direct' for s in segments
+        ) else 'per-section physical and visual-model copy audits; not deterministic OCR'),
     }
     asset.candidates.append(dict(
         candidate_id=candidate_id, index=len(asset.candidates) + 1, status=status,
@@ -79,6 +82,11 @@ def compose_best_sections(asset, target, runtime, store, width):
         error_info=info.model_dump(mode='json') if info else None,
         repair_prompt='', metadata=metadata,
     ))
+    if not failed and metadata['audit_method'] == 'not_performed':
+        asset.delivery = BestAvailableDelivery(
+            mode='direct', candidate_id=candidate_id, sha256=ref['sha256'],
+            stop_reason='generation_completed',
+        )
     asset.status, asset.file_path, asset.quality = status, ref['path'], None
     asset.error_info, asset.error = info, info.message if info else None
     asset.stop_reason = 'quality_repair_limit' if status == 'quality_failed' else status if info else None

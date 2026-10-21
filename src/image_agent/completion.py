@@ -67,12 +67,9 @@ def completion_problems(request, analysis, *, additional_issues=()):
     draft = resolve_selection(request, analysis)
     if draft.candidate is None:
         return []
-    subjects = {s.subject_id: s for s in analysis.subjects}
-    if any(not subjects[s].matches_product for s in draft.candidate.subject_ids):
-        return []
     active_issues = draft.blocking_issues + draft.pending_issues
-    # True identity ambiguity, required appearance and selection conflicts retain
-    # their original resolution path, even when creative guidance is also absent.
+    # Subject selection and explicit requirement conflicts need user input,
+    # even when creative guidance is also absent.
     if any(
         i.code not in PLANNING_ISSUE_CODES or i.resolution == "selection" for i in active_issues
     ):

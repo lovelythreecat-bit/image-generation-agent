@@ -7,8 +7,9 @@ import pytest
 from image_agent.config import AgentConfig
 from image_agent.errors import ProviderError, StaleAnalysisError
 from image_agent.models import CreationRequest, MaterialAnalysis
-from image_agent.pipeline import Dependencies, prepare_analysis, prepare_context, run_pipeline
+from image_agent.pipeline import Dependencies, prepare_analysis, prepare_context
 from tests.fakes import FakeGenerator, FakeVision, analysis_data
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_images import picture
 
 
@@ -106,7 +107,7 @@ async def test_missing_creative_plan_uses_ai_with_all_source_photos(request_data
     assert [m.material_id for m in vision.completion_inputs[0][1]] == ["m1", "m2"]
 
 
-async def test_explicit_snapshot_keeps_selection_and_rechecks(request_data):
+async def test_explicit_snapshot_keeps_selection_without_recheck(request_data):
     data = analysis_data()
     data["creative_plan"] = None
     vision = CompletionVision(data)
@@ -123,13 +124,13 @@ async def test_explicit_snapshot_keeps_selection_and_rechecks(request_data):
     )
     assert context is not None and context.selection.subject_ids == ["s1"]
     assert context.selection.required_element_ids == ["e1"]
-    assert vision.calls == ["discover", "complete", "complete", "evidence"]
+    assert vision.calls == ["discover", "complete", "complete"]
     assert snapshot.creative_plan is None and snapshot.status == "needs_input"
     assert result.analysis.analysis_id == snapshot.analysis_id
 
 
 @pytest.mark.parametrize("code", ["conflicting_identity", "ambiguous_subject"])
-async def test_identity_or_required_appearance_gaps_stay_honest(request_data, code):
+async def test_material_identity_warnings_do_not_block_generation(request_data, code):
     data = analysis_data()
     data.update(status="needs_input", creative_plan=creative_plan())
     data["issues"] = [
@@ -145,9 +146,9 @@ async def test_identity_or_required_appearance_gaps_stay_honest(request_data, co
     vision = CompletionVision(data)
     request, deps, generator = setup_completion(request_data, vision)
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
-    assert result.status == "needs_input" and not generator.calls
-    assert vision.calls == ["discover"]
-    assert result.issues[0].issue_id == "identity"
+    assert result.status == "succeeded" and len(generator.calls) == 1
+    assert vision.calls == ["discover", "audit:taobao.main_image.default"]
+    assert not result.issues and result.warnings
 
 
 @pytest.mark.parametrize("mutation", ["fact", "subject", "constraint", "selection", "element"])
@@ -261,7 +262,7 @@ class EvidenceGapVision(CompletionVision):
         return evidence
 
 
-async def test_evidence_discovered_creative_gap_is_completed_before_user_question(request_data):
+async def test_removed_review_cannot_invent_creative_gaps(request_data):
     vision = EvidenceGapVision()
     request, deps, _ = setup_completion(request_data, vision)
     prepared = await prepare_analysis(request, AgentConfig(), deps)
@@ -269,12 +270,12 @@ async def test_evidence_discovered_creative_gap_is_completed_before_user_questio
     context, result = await prepare_context(
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
-    assert context is not None and result.input_check.matches
-    assert vision.calls == ["discover", "evidence", "complete", "evidence"]
-    assert any(problem["code"] == "missing_scene" for problem in vision.completion_inputs[0][3])
+    assert context is not None and result.input_check is None
+    assert vision.calls == ["discover"]
+    assert not vision.completion_inputs
 
 
-async def test_persistent_evidence_creative_gap_is_bounded_provider_failure(request_data):
+async def test_removed_review_cannot_fail_ready_context(request_data):
     vision = EvidenceGapVision(persistent=True)
     request, deps, _ = setup_completion(request_data, vision)
     prepared = await prepare_analysis(request, AgentConfig(), deps)
@@ -282,9 +283,8 @@ async def test_persistent_evidence_creative_gap_is_bounded_provider_failure(requ
     context, result = await prepare_context(
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
-    assert context is None and result.status == "failed"
-    assert result.error_info.kind == "protocol"
-    assert vision.calls == ["discover", "evidence", "complete", "evidence"]
+    assert context is not None and result.error_info is None
+    assert vision.calls == ["discover"]
 
 
 async def test_fact_proof_review_continues_without_creative_repair(request_data):
@@ -296,7 +296,7 @@ async def test_fact_proof_review_continues_without_creative_repair(request_data)
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
     assert context is not None
-    assert vision.calls == ["discover", "evidence"]
+    assert vision.calls == ["discover"]
 
 
 async def test_warning_only_snapshot_keeps_existing_supported_view_path(request_data):
@@ -318,7 +318,7 @@ async def test_warning_only_snapshot_keeps_existing_supported_view_path(request_
     context, result = await prepare_context(
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
-    assert context is not None and result.input_check.matches
+    assert context is not None and result.input_check is None
     assert vision.calls == ["discover"]
 
 

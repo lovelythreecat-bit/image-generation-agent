@@ -448,7 +448,7 @@ class VisionClient:
             "A printed physical label, logo, character illustration or artwork on the actual product is visible_appearance with product_label evidence; "
             "its appearance must be preserved, while any performance assertion it contains is a SEPARATE functional_claim. "
             "Promotional overlays around the product are not product-native markings. Mixed visual and functional statements must be split into atomic facts. "
-            "Facts and their provenance/ID links are optional creative annotations, never prerequisites. Return empty facts, identity_fact_ids or fact_ids when unavailable; never fabricate them. Do not request proof or emit missing_evidence/unverifiable_claim issues for facts. Use original product images and subject/element descriptions to continue creation. Retain only genuine product identity or subject-selection ambiguities as input blockers. "
+            "Facts and their provenance/ID links are optional creative annotations, never prerequisites. Return empty facts, identity_fact_ids or fact_ids when unavailable; never fabricate them. Do not request proof or emit missing_evidence/unverifiable_claim issues for facts. Use original product images and subject/element descriptions to continue creation. Do not perform material verification or block creation because the observed product differs from its declared name/category. Only request subject selection when no usable subject can be selected. "
             "Interpret the user brief, style_hint and material hints into proposal, constraints and source_quote copied exactly from their input. "
             "Also perform CREATIVE PLANNING in this same response: always return a non-null creative_plan. "
             "Its user_requirements must contain only verbatim contiguous quotes from brief, style_hint, subject_hint, element_hints, known_info or required_copy, "
@@ -457,6 +457,17 @@ class VisionClient:
             "Translate vague wording such as premium, attractive or suitable for e-commerce into concrete executable visual choices. "
             "Consider scene, composition, lighting, palette, product_presentation and mood, with at most one suggestion per aspect. "
             "For each unspecified aspect that benefits from planning, give a specific instruction and a short reason tied to the user's goal. "
+            "For a marketing layout, use the existing composition suggestion to propose a short headline, "
+            "a few useful selling points or price/promotion labels selected from user-supplied content, "
+            "and their placement around the product. Briefs may contain serialized JSON: read their "
+            "product information and user instructions as input, not as text to print wholesale. "
+            "Prefer concise selections from the supplied wording; preserve explicitly requested exact "
+            "copy, numbers and offer conditions, and add no new claims. Use scene or palette suggestions "
+            "for concrete background and decorative choices when appropriate. Coordinate them as one "
+            "design rather than generic mood words. Keep these choices inside existing suggestion "
+            "instruction strings; do not add schema fields or turn design choices into required constraints. "
+            "This is flexible guidance, not a completeness checklist: sparse suggestions remain usable, "
+            "and absent marketing content does not require invented copy or clarification. "
             "Use Chinese for instructions and reasons. If the user already specifies an aspect, follow it in intent constraints and do not override it with a suggestion. "
             "With no creative text, propose restrained e-commerce defaults grounded in the visible source products. "
             "Create reusable visual direction, not a single fixed crop or a required pose. "
@@ -485,7 +496,7 @@ class VisionClient:
             + (
                 "Product name is an automatic placeholder: identify any clear sellable product. "
                 if is_placeholder(request)
-                else "Check selected subjects against the declared product and category, accessories against their role. "
+                else "Use the declared product and category as creative context; describe the supplied subjects and accessories without validating their match. "
             )
             + json.dumps(creative_input(request), ensure_ascii=False)
         )

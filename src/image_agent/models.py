@@ -1,6 +1,5 @@
 """Validated runtime contracts; importing this module has no I/O side effects."""
 
-import copy
 import re
 from pathlib import Path
 from typing import Annotated, Literal
@@ -354,7 +353,7 @@ class Issue(Model):
 class IntentAnalysis(Model):
     proposal: SelectionProposal
     constraints: list[IntentConstraint]
-    focus_element_ids: list[Id]
+    focus_element_ids: list[Id] = Field(default_factory=list)
     unmet_requirements: list[Issue]
 
 
@@ -399,7 +398,9 @@ class MaterialAnalysis(Model):
         """Discard unusable optional annotations; never invent facts or source IDs."""
         if not isinstance(value, dict):
             return value
-        data = copy.deepcopy(value)
+        from .analysis_merge import merge_analysis_duplicates
+
+        data = merge_analysis_duplicates(value)
 
         def field(row, name, default=None):
             return row.get(name, default) if isinstance(row, dict) else getattr(row, name, default)
@@ -479,7 +480,8 @@ class MaterialAnalysis(Model):
 
         facts = {f.fact_id: f for f in self.facts}
         for f in self.facts:
-            refs([e.material_id for e in f.evidence], "material")
+            # Several observations/provenance records may cite the same source image.
+            refs(list(dict.fromkeys(e.material_id for e in f.evidence)), "material")
             refs([f.subject_id] if f.subject_id else [], "subject")
         for s in self.subjects:
             refs(s.material_ids, "material")
@@ -719,7 +721,7 @@ class PreparedAnalysis(Model):
 
 class PreparedContext(PreparedAnalysis):
     selection: ResolvedSelection
-    input_check: ProductInputAudit
+    input_check: ProductInputAudit | None = None
     presentation_mode: str
     product_attributes: dict = Field(default_factory=dict)
     user_input: dict = Field(default_factory=dict)
@@ -811,7 +813,7 @@ class GenerationAttempt(Model):
 
 
 class BestAvailableDelivery(Model):
-    mode: Literal['best_available'] = 'best_available'
+    mode: Literal['best_available', 'direct'] = 'best_available'
     candidate_id: str = Field(min_length=1)
     score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
@@ -850,7 +852,7 @@ class CreationResult(Model):
     presentation_mode: str = "product_only"
     style_prompt: str | None = None
     product_attributes: dict = Field(default_factory=dict)
-    input_check: ProductInputAudit
+    input_check: ProductInputAudit | None = None
     warnings: list[str] = Field(default_factory=list)
     assets: list[Asset] = Field(default_factory=list)
     detail_set_audits: list[DetailSetAudit] = Field(default_factory=list)

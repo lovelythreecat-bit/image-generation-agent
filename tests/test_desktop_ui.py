@@ -345,6 +345,27 @@ def test_clarification_resumes_with_selected_snapshot(app, tmp_path, monkeypatch
     assert app.preview_image is not None
 
 
+def test_material_review_snapshot_does_not_block_desktop_generation(app, tmp_path, monkeypatch):
+    from tests.test_removed_material_review import disputed_analysis
+
+    fill(app, tmp_path)
+    for field in app.key_fields.values():
+        field.set("test-key")
+    snapshot = MaterialAnalysis(**disputed_analysis())
+    app.show_analysis(snapshot)
+    calls = []
+
+    async def create(request, config, *, analysis, on_progress=None):
+        calls.append(analysis)
+        return result()
+
+    monkeypatch.setattr("image_agent.desktop.create_images", create)
+    app.start("create")
+    wait_idle(app)
+    assert calls == [snapshot]
+    assert "全部成功" in app.status.get()
+
+
 def test_clearing_materials_clears_stale_preview(app, tmp_path):
     fill(app, tmp_path)
     assert app.preview_image is not None
@@ -375,7 +396,7 @@ def test_desktop_generates_and_saves_through_real_pipeline(app, tmp_path, monkey
     wait_idle(app)
     assert "全部成功" in app.status.get(), app.json_text.get("1.0", "end")
     assert (app.output_folder / "result.json").is_file()
-    assert (app.output_folder / "approved" / "taobao" / "main_image" / "default.png").is_file()
+    assert (app.output_folder / "delivered" / "taobao" / "main_image" / "default.png").is_file()
     assert app.preview_image is not None
     assert len(app.result_tree.get_children()) == 1
 

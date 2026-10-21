@@ -195,3 +195,12 @@ class FakeGenerator:
             raise self.error
         a, b = map(int, kwargs["aspect_ratio"].split(":"))
         return picture((int(1600 * a / max(a, b)), int(1600 * b / max(a, b))))
+
+
+async def run_reviewed_pipeline(*args, policy=None, **kwargs):
+    """Exercise historical review/recovery behavior explicitly, never the new default."""
+    from image_agent.execution import ExecutionPolicy
+    from image_agent.pipeline import run_pipeline
+
+    policy = (policy or ExecutionPolicy()).model_copy(update={"review_generated_images": True})
+    return await run_pipeline(*args, policy=policy, **kwargs)

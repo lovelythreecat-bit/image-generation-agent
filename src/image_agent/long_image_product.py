@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from .completion import completion_problems, maybe_complete_analysis
+from .completion import maybe_complete_analysis
 from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError
 from .long_image_models import LongImageRequirement
@@ -17,12 +17,10 @@ from .models import (
     IntentConstraint,
     MaterialAnalysis,
     PreparedContext,
-    ProductInputAudit,
     Requirement,
 )
 from .platforms import generation_instruction
 from .prompt import build_prompt, resolve_presentation
-from .quality import validate_check_ids
 from .selection import (
     analysis_fingerprint,
     bind_generation_references,
@@ -135,11 +133,6 @@ def _validate_materials(request, materials):
 
 
 def _context(request, materials, analysis, selection):
-    selected = [s for s in analysis.subjects if s.subject_id in selection.subject_ids]
-    if not selected or any(not s.matches_product for s in selected):
-        raise AgentError(
-            "selected product does not match declared context", code="input_mismatch", kind="input"
-        )
     observed = "; ".join(
         f.description for f in analysis.facts if f.subject_id in selection.subject_ids
     )
@@ -148,35 +141,14 @@ def _context(request, materials, analysis, selection):
         materials=tuple(materials),
         analysis=analysis,
         selection=selection,
-        input_check=ProductInputAudit(
-            matches=True, observed_product=observed, reason="所选真实商品证据已核对"
-        ),
         presentation_mode=resolve_presentation(adapter, observed),
         user_input=creative_input(adapter),
         warnings=list(analysis.warnings),
     )
 
 
-async def _review_product_evidence(adapter, materials, analysis, draft, vision):
-    if draft.candidate is None or draft.blocking_issues:
-        return None
-    evidence = await vision.validate_evidence(adapter, materials, analysis, draft)
-    expected = {
-        "subject_id": draft.candidate.subject_ids,
-        "issue_id": [i.issue_id for i in draft.pending_issues],
-    }
-    for key, ids in expected.items():
-        rows = (
-            evidence.issue_resolutions
-            if key == "issue_id"
-            else getattr(evidence, key.removesuffix("_id") + "_checks")
-        )
-        validate_check_ids(rows, ids, key)
-    return evidence
-
-
 async def prepare_long_product(request, materials, *, analysis, vision, config=None):
-    """Caller owns the enclosing vision call_scope for all discovery/evidence POSTs."""
+    """Caller owns the enclosing vision call_scope for discovery/planning POSTs."""
     if request.scene != "product_detail":
         raise AgentError("product adapter requires product_detail")
     config = config or getattr(vision, "config", None) or AgentConfig()
@@ -227,38 +199,18 @@ async def prepare_long_product(request, materials, *, analysis, vision, config=N
         )
     analysis = await maybe_complete_analysis(adapter, materials, analysis, vision, config)
     draft = resolve_selection(adapter, analysis)
-    evidence = None
-    # A supplied snapshot is always rechecked unless a trusted planning record was resolved
-    # by prepare_long_plan, which uses product_from_plan instead of this paid path.
-    if draft.candidate and not draft.blocking_issues and (supplied or draft.pending_issues):
-        evidence = await _review_product_evidence(adapter, materials, analysis, draft, vision)
-    resolution = finalize_selection(draft, evidence)
-    if resolution.status == "needs_input" and evidence is not None and resolution.issues:
-        completed = await maybe_complete_analysis(
-            adapter, materials, analysis, vision, config, additional_issues=resolution.issues
-        )
-        if completed is not analysis:
-            analysis = completed
-            draft = resolve_selection(adapter, analysis)
-            evidence = await _review_product_evidence(adapter, materials, analysis, draft, vision)
-            resolution = finalize_selection(draft, evidence)
-            if resolution.status == "needs_input" and completion_problems(
-                adapter, analysis, additional_issues=resolution.issues
-            ):
-                raise ProviderError(
-                    "evidence review still reports unresolved creative planning gaps"
-                )
+    resolution = finalize_selection(draft)
     product = PreparedLongProduct(
         materials,
         analysis,
         resolution.status,
-        evidence=evidence,
         issues=resolution.issues,
         error_info=resolution.error_info,
         config=config,
     )
     if resolution.status == "ready":
         product.context = _context(request, materials, analysis, resolution.selection)
+        product.context.warnings.extend(r.reason for r in draft.issue_resolutions)
     return product
 
 

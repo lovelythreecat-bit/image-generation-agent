@@ -1,9 +1,10 @@
 import pytest
 
 from image_agent.errors import ProviderError
-from image_agent.pipeline import Dependencies, prepare_analysis, run_pipeline
+from image_agent.pipeline import Dependencies, prepare_analysis
 from tests import test_server_tasks as task_fixtures
 from tests.fakes import FakeGenerator, FakeVision
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_server_media import png
 from tests.test_server_tasks import submit
 

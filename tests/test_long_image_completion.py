@@ -66,9 +66,9 @@ class EvidenceCompletingVision(CompletingVision):
 
 
 @pytest.mark.parametrize(
-    "code,expected,calls", [("missing_scene", "ready", 3), ("missing_evidence", "needs_input", 1)]
+    "code,expected,calls", [("missing_scene", "ready", 0), ("missing_evidence", "ready", 0)]
 )
-async def test_legacy_evidence_completion_preserves_real_source_failure(code, expected, calls):
+async def test_legacy_snapshot_never_runs_material_review(code, expected, calls):
     request, materials = inputs(selection={"mode": "explicit", "subject_ids": ["s1"]})
     snapshot = MaterialAnalysis.model_validate(analysis_data())
     snapshot.fingerprint = long_discovery_fingerprint(request, materials)
@@ -103,7 +103,7 @@ async def test_legacy_explicit_selection_supplements_plan_without_mutating_snaps
         assert product.context.selection.subject_ids == ["s1"]
         assert product.context.analysis.creative_plan is not None
         assert snapshot.model_dump_json() == original
-        assert ledger.usage() == {"image_calls": 0, "vision_calls": 2}
+        assert ledger.usage() == {"image_calls": 0, "vision_calls": 1}
     finally:
         ledger.close()
 

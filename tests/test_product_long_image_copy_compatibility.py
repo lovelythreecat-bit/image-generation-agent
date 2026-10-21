@@ -8,7 +8,6 @@ import pytest
 
 from image_agent.config import AgentConfig
 from image_agent.errors import OutputError, ProviderError
-from image_agent.pipeline import run_pipeline
 from image_agent.product_long_image import (
     ProductLongImageWorkflow,
     validate_product_long_image_plan,
@@ -16,6 +15,7 @@ from image_agent.product_long_image import (
 from image_agent.product_long_image_models import ProductLongImagePlan, ProductLongImageSection
 from image_agent.run_store import RunStore
 from image_agent.vision import VisionClient, _parse_vision_response
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_product_long_image_pipeline import long_setup
 from tests.test_product_long_image_planning import authored_plan, planning_context
 from tests.test_vision import ScriptTransport

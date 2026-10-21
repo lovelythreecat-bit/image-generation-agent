@@ -9,11 +9,12 @@ from image_agent.config import AgentConfig
 from image_agent.contracts import result_to_bundle
 from image_agent.errors import ProviderError
 from image_agent.models import CreationRequest, MaterialAnalysis
-from image_agent.pipeline import prepare_analysis, prepare_context, run_pipeline
+from image_agent.pipeline import prepare_analysis, prepare_context
 from image_agent.quality import evaluate_quality
 from image_agent.selection import compile_element_plan, resolve_selection
 from image_agent.vision import VisionClient, _parse_vision_response, selected_fact_ids
 from tests.fakes import analysis_data
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_images import picture
 from tests.test_pipeline import setup
 from tests.test_quality import audit, plan, target
@@ -144,7 +145,7 @@ async def test_surplus_image_and_product_checks_need_one_provider_call(request_d
     assert len(review.subject_checks) == 1 and len(transport.calls) == 2
 
 
-async def test_unchanged_ready_snapshot_skips_evidence_but_unresolved_rechecks(request_data):
+async def test_ready_and_disputed_snapshots_skip_material_review(request_data):
     request, deps, vision, _ = setup(request_data)
     prepared = await prepare_analysis(request, AgentConfig(), deps)
     ctx, result = await prepare_context(
@@ -164,7 +165,7 @@ async def test_unchanged_ready_snapshot_skips_evidence_but_unresolved_rechecks(r
         )
     )
     ctx, result = await prepare_context(request, AgentConfig(), dependencies=deps, analysis=changed)
-    assert ctx is not None and vision.calls.count("evidence") == 1
+    assert ctx is not None and "evidence" not in vision.calls
 
 
 async def test_legacy_needs_input_low_confidence_only_skips_redundant_recheck(request_data):
@@ -188,7 +189,7 @@ async def test_legacy_needs_input_low_confidence_only_skips_redundant_recheck(re
     assert ctx is not None and "evidence" not in vision.calls and result.warnings
 
 
-async def test_injected_evidence_surplus_discarded_and_missing_still_fails(request_data):
+async def test_removed_material_reviewer_cannot_block_context(request_data):
     from image_agent.models import Issue
 
     request, deps, vision, _ = setup(request_data)
@@ -225,7 +226,8 @@ async def test_injected_evidence_surplus_discarded_and_missing_still_fails(reque
     ctx, result = await prepare_context(
         request, AgentConfig(), dependencies=deps, analysis=prepared.analysis
     )
-    assert ctx is None and result.status == "failed"
+    assert ctx is not None and result.error_info is None
+    assert "evidence" not in vision.calls
 
 
 async def test_quote_variations_and_unverifiable_requirements_downgrade(request_data):

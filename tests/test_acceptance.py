@@ -10,9 +10,9 @@ from pydantic import ValidationError
 
 from image_agent import AgentConfig, CreationRequest, CreationRequestDTO, MaterialAnalysis
 from image_agent.errors import ProviderError
-from image_agent.pipeline import run_pipeline
 from image_agent.selection import compile_element_plan, resolve_selection
 from tests.fakes import analysis_data
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_pipeline import setup
 from tests.test_quality import audit, plan, target
 from tests.test_selection import context

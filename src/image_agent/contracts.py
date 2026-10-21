@@ -154,7 +154,7 @@ class CreationResultDTO(Model):
     presentation_mode: str
     style_prompt: str | None = None
     product_attributes: dict
-    input_check: ProductInputAudit
+    input_check: ProductInputAudit | None = None
     warnings: list[str]
     assets: list[AssetDTO]
     detail_set_audits: list[DetailSetAudit]

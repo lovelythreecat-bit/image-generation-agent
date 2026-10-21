@@ -109,8 +109,9 @@ class AcceptRequest(Model):
 
 def config_mapping(config):
     mapping = config.model_dump(mode="json", exclude=LEGACY_FIELDS)
+    active = config.credential_services()
     for name, service in config.services.items():
-        mapping["services"][name]["api_key"] = service.credential()
+        mapping["services"][name]["api_key"] = service.credential() if name in active else None
         mapping["services"][name].pop("api_key_env", None)
     return mapping
 
@@ -671,7 +672,7 @@ class TaskService:
             config = AgentConfig.from_mapping(
                 self.cipher.decrypt_mapping(task.config_snapshot_encrypted)
             )
-            secrets = [service.credential() for service in config.services.values()]
+            secrets = [service.credential() for service in config.credential_services().values()]
             dto = CreationRequestDTO.model_validate(task.normalized_request["request"])
             client_material_ids = {material.material_id for material in dto.materials}
 

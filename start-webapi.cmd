@@ -16,8 +16,16 @@ if not exist "server.config.json" (
   exit /b 1
 )
 
+echo Checking for an existing image-agent Web API...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-webapi.ps1" -PythonExecutable "%~dp0.venv\Scripts\python.exe"
+if errorlevel 1 (
+  echo Failed to stop the existing Web API. Startup cancelled.
+  pause
+  exit /b 1
+)
+
 echo Starting image-agent Web API. Press Ctrl+C to stop.
-".venv\Scripts\python.exe" -m image_agent.server
+"%~dp0.venv\Scripts\python.exe" -m image_agent.server
 set "webapi_exit_code=%errorlevel%"
 if not "%webapi_exit_code%"=="0" (
   echo Web API exited with code %webapi_exit_code%.

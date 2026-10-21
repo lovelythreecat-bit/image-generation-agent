@@ -168,8 +168,8 @@ async def test_two_products_selection_uses_same_snapshot():
     assert second.status == "ready"
     assert first.analysis == second.analysis
     assert second.context.selection.primary_subject_id == "s2"
-    assert ledger.usage()["vision_calls"] == 2
-    assert vision.calls == ["discover", "evidence"]
+    assert ledger.usage()["vision_calls"] == 1
+    assert vision.calls == ["discover"]
     ledger.close()
 
 
@@ -366,7 +366,7 @@ async def test_product_audit_uses_scoped_quality_report_and_strict_ids():
 
 
 @pytest.mark.asyncio
-async def test_tampered_snapshot_primary_product_requires_real_evidence():
+async def test_snapshot_does_not_call_rejecting_material_reviewer():
     from image_agent.long_image_product import prepare_long_product
     from image_agent.models import EvidenceValidation
 
@@ -399,10 +399,10 @@ async def test_tampered_snapshot_primary_product_requires_real_evidence():
         checked = await prepare_long_product(
             request, materials, analysis=product.analysis, vision=RejectVision()
         )
-    assert checked.status == "failed"
-    assert checked.context is None
-    assert checked.error_info.code == "input_mismatch"
-    assert ledger.usage()["vision_calls"] == 1
+    assert checked.status == "ready"
+    assert checked.context is not None and checked.context.input_check is None
+    assert checked.error_info is None
+    assert ledger.usage()["vision_calls"] == 0
     ledger.close()
 
 

@@ -91,24 +91,18 @@ async def test_full_pipeline_routes_same_model_by_alias(
         **(request_data | {"image_model": "fast", "output_dir": tmp_path / "out"})
     )
     result = await create_images(request, config)
-    assert result.status == ("audit_error" if audit_reply == "fail" else "succeeded")
-    assert len(calls) == (4 if image_response == "url" else 3) + (
-        5 if audit_reply == "fail" else audit_reply != "valid"
-    )
+    assert result.status == "succeeded"
+    assert len(calls) == (3 if image_response == "url" else 2)
+    assert audit_calls == 0
     assert sum(r.url.host == "image.example" for r in calls) == 1
     assert result.assets[0].model == "gpt-image-2"
     assert len(list((tmp_path / "out").glob("*/result.json"))) == 1
-    pattern = (
-        "*/candidates/taobao.main_image.default/c0001.png"
-        if audit_reply == "fail"
-        else "*/approved/taobao/main_image/default.png"
-    )
+    pattern = "*/delivered/taobao/main_image/default.png"
     saved_images = list((tmp_path / "out").glob(pattern))
     assert len(saved_images) == 1 and saved_images[0].read_bytes() == image_data
-    if audit_reply == "fail":
-        assert result.assets[0].quality is None
-        assert "audit_image" in result.assets[0].error
-        assert "subject_checks" in result.assets[0].error
+    assert result.assets[0].quality is None
+    assert result.assets[0].delivery.mode == "direct"
+    assert result.assets[0].error is None
 
 
 async def test_missing_configured_key_and_alias_fail_before_output(

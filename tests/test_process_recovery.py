@@ -34,7 +34,8 @@ from image_agent.config import AgentConfig
 from image_agent.execution import ExecutionPolicy, reserve_post
 from image_agent.graph_runtime import resume_pipeline
 from image_agent.models import CreationRequest
-from image_agent.pipeline import Dependencies, run_pipeline
+from image_agent.pipeline import Dependencies
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.fakes import FakeGenerator, FakeVision
 
 class BudgetedVision(FakeVision):

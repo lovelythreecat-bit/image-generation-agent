@@ -1044,10 +1044,6 @@ class DesktopApp:
             if analysis is not None:
                 if self.choice.current() > 0:
                     request.selection = self.selection_options[self.choice.current() - 1]
-                elif self.needs_input:
-                    raise ValueError(
-                        "请在「素材分析 / 澄清」中选择方案，或修改素材与要求后重新分析。"
-                    )
                 elif analysis.status == "failed":
                     analysis = None
             self.run_dir = None

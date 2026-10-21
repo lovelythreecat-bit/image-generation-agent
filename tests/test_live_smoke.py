@@ -49,7 +49,7 @@ def test_repeated_command_without_id_saves_both_runs(tmp_path, monkeypatch, entr
     for manifest in manifests:
         data = json.loads(manifest.read_text("utf-8"))
         assert data["status"] == "succeeded"
-        assert data["assets"][0]["image"].startswith("approved/")
+        assert data["assets"][0]["image"].startswith("delivered/")
         assert (manifest.parent / data["assets"][0]["image"]).read_bytes() == picture((1600, 1600))
 
 

@@ -461,12 +461,15 @@ class ConfigService:
                         **service.model_dump(exclude={"api_key", "api_key_env"}),
                         "api_key": service.credential(),
                     }
-                    for key, service in config.services.items()
+                    for key, service in config.credential_services().items()
                 }
                 image_models = {
                     key: route.model_dump() for key, route in config.image_models.items()
                 }
-                stages = {key: route.model_dump() for key, route in config.stages.items()}
+                stages = {
+                    key: route.model_dump() for key, route in config.stages.items()
+                    if key != "validate_evidence"
+                }
             # Validate name and runtime before making any database changes.
             validate_input(
                 AgentConfigCreate,

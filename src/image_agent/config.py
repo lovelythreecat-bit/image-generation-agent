@@ -165,16 +165,27 @@ class AgentConfig(Model):
         return cls.from_mapping(data)
 
     def service_names(self, image_alias=None):
-        names = {route.service for route in self.stages.values()}
+        names = {
+            route.service for stage, route in self.stages.items() if stage != "validate_evidence"
+        }
         if image_alias is not None and self.services:
             self.model_name(image_alias)
             names.add(self.image_models[image_alias].service)
         return names
 
+    def credential_services(self):
+        """Keep historical routes for run fingerprints, without requiring retired credentials."""
+        retired = self.stages.get("validate_evidence")
+        used = self.service_names() | {r.service for r in self.image_models.values()}
+        return {
+            name: service for name, service in self.services.items()
+            if retired is None or name != retired.service or name in used
+        }
+
     def validate_credentials(self, services=None):
         if self.services:
             if services is None:
-                services = {r.service for r in [*self.image_models.values(), *self.stages.values()]}
+                services = self.service_names() | {r.service for r in self.image_models.values()}
             for name in sorted(services):
                 self.services[name].credential()
         elif not self.openrouter_api_key or not self.openrouter_api_key.get_secret_value().strip():

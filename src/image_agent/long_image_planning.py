@@ -46,7 +46,7 @@ def long_image_dependencies(transport, config, image_alias=None):
 def planning_service_names(request, config):
     stages = ["plan_long_image"]
     if request.scene == "product_detail":
-        stages.extend(["analyze_materials", "validate_evidence"])
+        stages.append("analyze_materials")
     return {route.service for stage in stages if (route := config.vision_route(stage)) is not None}
 
 

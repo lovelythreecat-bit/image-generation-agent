@@ -358,8 +358,11 @@
       "additionalProperties": false,
       "properties": {
         "mode": {
-          "const": "best_available",
           "default": "best_available",
+          "enum": [
+            "best_available",
+            "direct"
+          ],
           "title": "Mode",
           "type": "string"
         },
@@ -2083,7 +2086,15 @@
       "type": "object"
     },
     "input_check": {
-      "$ref": "#/$defs/ProductInputAudit"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProductInputAudit"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "warnings": {
       "items": {
@@ -2147,7 +2158,6 @@
     "status",
     "presentation_mode",
     "product_attributes",
-    "input_check",
     "warnings",
     "assets",
     "detail_set_audits",

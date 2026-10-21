@@ -7,7 +7,7 @@ from typing import Awaitable, Callable, Protocol
 
 from pydantic import ValidationError
 
-from .completion import completion_problems, maybe_complete_analysis
+from .completion import maybe_complete_analysis
 from .config import AgentConfig
 from .errors import AgentError, ProviderError, StaleAnalysisError, make_error_info
 from .generate import ImageGenerator
@@ -21,14 +21,10 @@ from .models import (
     MaterialAnalysis,
     PreparedAnalysis,
     PreparedContext,
-    ProductInputAudit,
 )
 from .prompt import (
     is_apparel,
     resolve_presentation,
-)
-from .quality import (
-    normalize_audit_checks,
 )
 from .selection import (
     analysis_fingerprint,
@@ -42,7 +38,6 @@ from .vision import VisionClient
 
 class VisionProtocol(Protocol):
     async def analyze_materials(self, request, materials): ...
-    async def validate_evidence(self, request, materials, analysis, draft): ...
     async def extract_garments(self, request, materials, subject_id): ...
     async def describe_style(self, request, references): ...
     async def audit_image(self, request, target, context, plan, image): ...
@@ -148,41 +143,8 @@ async def prepare_analysis(request, config, dependencies, *, loaded_materials=No
 def _result(request, **kwargs):
     return CreationResult(
         request_id=request.request_id,
-        input_check=ProductInputAudit(matches=False, observed_product="", reason="核对服务失败"),
         status="failed",
         **kwargs,
-    )
-
-
-async def _selection_evidence(request, prepared, draft, dependencies, config, *, force=False):
-    warnings_only = bool(draft.issue_resolutions) and all(
-        resolution.status == "irrelevant" for resolution in draft.issue_resolutions
-    )
-    if not (
-        draft.candidate
-        and not draft.blocking_issues
-        and (
-            force
-            or draft.pending_issues
-            or (prepared.analysis.status != "ready" and not warnings_only)
-        )
-    ):
-        return None
-    if len(prepared.materials) > config.vision_image_limit:
-        raise ProviderError(
-            "evidence review exceeds vision capacity",
-            kind="capability",
-            code="vision_capacity_exceeded",
-        )
-    evidence = await dependencies.vision.validate_evidence(
-        request, prepared.materials, prepared.analysis, draft
-    )
-    return normalize_audit_checks(
-        evidence,
-        {
-            "subject_id": draft.candidate.subject_ids,
-            "issue_id": [i.issue_id for i in draft.pending_issues],
-        },
     )
 
 
@@ -190,7 +152,6 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
     if request.selection.mode == "explicit" and analysis is None:
         raise AgentError("explicit selection requires the same analysis snapshot")
     result = _result(request)
-    snapshot_requires_review = False
     if analysis is None:
         prepared = await prepare_analysis(
             request, config, dependencies, loaded_materials=loaded_materials
@@ -204,7 +165,6 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         )
         if analysis.fingerprint != analysis_fingerprint(request, materials):
             raise StaleAnalysisError("analysis does not match current materials, hints or brief")
-        snapshot = analysis
         try:
             analysis = await maybe_complete_analysis(
                 request, materials, analysis, dependencies.vision, config
@@ -213,7 +173,6 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
             result.analysis = analysis
             result.error_info = make_error_info(error, stage="analyze_materials")
             return None, result
-        snapshot_requires_review = snapshot.status != "ready" and analysis is not snapshot
         prepared = PreparedAnalysis(materials=materials, analysis=analysis)
     result.analysis = prepared.analysis
     result.warnings.extend(prepared.analysis.warnings)
@@ -223,55 +182,15 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
         return None, result
     try:
         draft = resolve_selection(request, prepared.analysis)
-        warnings_only = bool(draft.issue_resolutions) and all(
-            resolution.status == "irrelevant" for resolution in draft.issue_resolutions
-        )
-        if warnings_only:
-            result.warnings.extend(resolution.reason for resolution in draft.issue_resolutions)
-        evidence = await _selection_evidence(
-            request, prepared, draft, dependencies, config, force=snapshot_requires_review
-        )
-        resolution = finalize_selection(draft, evidence)
-        if resolution.status == "needs_input" and evidence is not None and resolution.issues:
-            completed = await maybe_complete_analysis(
-                request,
-                prepared.materials,
-                prepared.analysis,
-                dependencies.vision,
-                config,
-                additional_issues=resolution.issues,
-            )
-            if completed is not prepared.analysis:
-                prepared.analysis = completed
-                result.analysis = completed
-                result.warnings = list(dict.fromkeys(result.warnings + completed.warnings))
-                draft = resolve_selection(request, completed)
-                evidence = await _selection_evidence(
-                    request, prepared, draft, dependencies, config, force=True
-                )
-                resolution = finalize_selection(draft, evidence)
-                if resolution.status == "needs_input" and completion_problems(
-                    request, completed, additional_issues=resolution.issues
-                ):
-                    raise ProviderError(
-                        "evidence review still reports unresolved creative planning gaps"
-                    )
+        result.warnings.extend(resolution.reason for resolution in draft.issue_resolutions)
+        resolution = finalize_selection(draft)
         if resolution.status != "ready":
             result.status = "needs_input" if resolution.status == "needs_input" else "failed"
             result.issues = resolution.issues
             result.error_info = resolution.error_info
-            result.input_check.reason = (
-                "待澄清" if result.status == "needs_input" else "所选商品不符"
-            )
             return None, result
         selection = resolution.selection
         selected = [s for s in prepared.analysis.subjects if s.subject_id in selection.subject_ids]
-        if evidence is None and any(not s.matches_product for s in selected):
-            result.error_info = ErrorInfo(
-                code="input_mismatch", kind="input", message="所选商品与声明不符"
-            )
-            result.input_check.reason = result.error_info.message
-            return None, result
         observed = "; ".join(
             s.subject_id
             + ": "
@@ -281,14 +200,10 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
             for s in selected
         )
         presentation = resolve_presentation(request, observed)
-        input_check = ProductInputAudit(
-            matches=True, observed_product=observed, reason="所选商品核对通过"
-        )
         context = PreparedContext(
             materials=prepared.materials,
             analysis=prepared.analysis,
             selection=selection,
-            input_check=input_check,
             presentation_mode=presentation,
             user_input=creative_input(request),
             product_attributes={
@@ -353,7 +268,6 @@ async def prepare_context(request, config, *, dependencies, analysis=None, loade
                     if s.aspect in ("scene", "lighting", "palette", "mood")
                 },
             }
-        result.input_check = input_check
         result.presentation_mode = presentation
         result.product_attributes = context.product_attributes
         result.style_prompt = context.style_prompt

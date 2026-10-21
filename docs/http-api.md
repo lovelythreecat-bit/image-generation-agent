@@ -4,7 +4,7 @@
 
 ## 安装与启动
 
-Windows 已完成依赖安装、`server.config.json` 配置及数据库迁移后，双击仓库根目录的 `start-webapi.cmd` 即可启动服务。脚本自动切换到项目目录并使用 `.venv`，启动失败时保留窗口显示错误，按 `Ctrl+C` 停止服务。
+Windows 已完成依赖安装、`server.config.json` 配置及数据库迁移后，双击仓库根目录的 `start-webapi.cmd` 即可启动或重启服务。脚本自动切换到项目目录，先关闭本项目 `.venv` 下运行的旧 API 及其子进程，确认退出后再启动；关闭失败时取消启动并显示错误。启动失败时保留窗口显示错误，按 `Ctrl+C` 停止服务。
 
 以下安装与迁移命令在仓库根目录执行；仅安装分发包时，还需获取同版本的 `server-alembic.ini` 与 `migrations/server` 管理文件。
 
@@ -120,6 +120,8 @@ if ($state.status -eq "completed") {
 上传只接受可解码图片，不信任原文件名；返回 `media_id`、MIME、字节数和 SHA256。外部请求只能引用已有 media_id，不接受本地路径、远程 URL、output_dir、可信分析声明或预算覆盖。创建服务、模型、Agent 返回 201；提交任务返回 202；下载实际导出 blob 返回对应图片 MIME（例如 image/png）。
 
 将上述提交中的 `kind` 改为 `analyze_materials` 可先分析。分析结果由 `/tasks/{id}/result` 返回；后续生成提交可携带顶层 `analysis_task_id`，并用该分析返回的实际 ID 设置 `request.selection`。素材及分析快照需匹配，客户端不能自行声明可信分析。商品长图在 `request.output_types` 加入 `long_image`，并在 `request.long_image` 设置核心 DTO 的宽度、区段数、比例、已知信息与必需文案；完整字段见在线 Schema。
+
+素材核对已移除：生成不再调用 `validate_evidence`，也不因模型的商品匹配判断或待复核提示阻塞。新结果的 `input_check` 为 `null`，客户端不应展示素材核对卡片或将其作为任务成功条件；历史任务仍可返回旧报告。素材分析继续用于主体选择与创作，输入快照匹配、图片可读取性和合法选择仍会验证。
 
 ## 更新、恢复与错误语义
 

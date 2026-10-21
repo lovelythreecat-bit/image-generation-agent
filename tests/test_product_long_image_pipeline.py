@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw
 
 from image_agent.config import AgentConfig
 from image_agent.execution import ExecutionPolicy, reserve_post
-from image_agent.pipeline import run_pipeline
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_pipeline import setup
 from tests.test_product_long_image_planning import authored_plan
 

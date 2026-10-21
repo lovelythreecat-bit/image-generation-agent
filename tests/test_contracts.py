@@ -23,8 +23,9 @@ def dto_data():
 async def test_integration_adapter_executes_real_selection_pipeline():
     from examples.integration_adapter import create_from_media
     from image_agent import AgentConfig, CreationRequestDTO
-    from image_agent.pipeline import Dependencies, prepare_analysis, run_pipeline
+    from image_agent.pipeline import Dependencies, prepare_analysis
     from tests.fakes import FakeGenerator, FakeVision
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_images import picture
 
     cfg = AgentConfig()

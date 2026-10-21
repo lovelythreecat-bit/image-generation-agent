@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from image_agent.config import AgentConfig
-from image_agent.pipeline import run_pipeline
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_pipeline import setup
 
 

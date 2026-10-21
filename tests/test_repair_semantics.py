@@ -339,7 +339,7 @@ def test_repair_rebuilds_bindings_from_current_plan(request_data):
 
 
 async def test_repair_restores_optional_reference_after_staged_fusion(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_pipeline import setup
 
     data = analysis_data()

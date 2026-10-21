@@ -26,7 +26,7 @@ def setup(request_data, *, scores=None, discovery=None, error=None):
 
 
 async def test_four_assets_one_preparation_and_one_strict_repair(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data["output_types"] = ["detail_page", "main_image"]
     r, deps, vision, gen = setup(request_data, scores={"feature": [{"output_intent": 74}, {}]})
@@ -50,7 +50,7 @@ async def test_four_assets_one_preparation_and_one_strict_repair(request_data):
     ],
 )
 async def test_identity_and_intent_repair_modes(request_data, scores, expected_calls, mode):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     r, deps, vision, gen = setup(request_data, scores={"main": [scores, {}]})
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
@@ -63,7 +63,7 @@ async def test_identity_and_intent_repair_modes(request_data, scores, expected_c
 
 
 async def test_quality_service_failure_no_creative_retry(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     r, deps, vision, gen = setup(
         request_data, scores={"main": [ProviderError("timeout", kind="transport")]}
@@ -83,7 +83,7 @@ async def test_audit_protocol_failure_preserves_candidate_and_saved_manifest(
 
     from image_agent.contracts import result_to_bundle
     from image_agent.output import save_result
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     r, deps, vision, gen = setup(
         request_data, scores={"main": [ProviderError("audit_image: fact_checks missing")]}
@@ -107,7 +107,8 @@ async def test_audit_protocol_failure_preserves_candidate_and_saved_manifest(
 
 
 async def test_snapshot_recovery_and_stale_detection(request_data):
-    from image_agent.pipeline import prepare_analysis, run_pipeline
+    from image_agent.pipeline import prepare_analysis
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     r, deps, vision, gen = setup(request_data)
     prepared = await prepare_analysis(r, AgentConfig(), deps)
@@ -117,15 +118,15 @@ async def test_snapshot_recovery_and_stale_detection(request_data):
         dict(mode="explicit", subject_ids=["s1"], preferred_element_ids=["e1"])
     )
     result = await run_pipeline(r, AgentConfig(), dependencies=deps, analysis=snapshot)
-    assert result.status == "succeeded" and vision.calls.count("evidence") == 1
+    assert result.status == "succeeded" and "evidence" not in vision.calls
     assert vision.calls.count("discover") == 1
     r.creative_brief = "changed"
     with pytest.raises(StaleAnalysisError):
         await run_pipeline(r, AgentConfig(), dependencies=deps, analysis=snapshot)
 
 
-async def test_explicit_requires_snapshot_and_input_mismatch(request_data):
-    from image_agent.pipeline import run_pipeline
+async def test_explicit_requires_snapshot_but_material_mismatch_does_not_block(request_data):
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     r, deps, vision, gen = setup(request_data)
     r.selection = r.selection.model_validate(dict(mode="explicit", subject_ids=["s1"]))
@@ -136,13 +137,12 @@ async def test_explicit_requires_snapshot_and_input_mismatch(request_data):
     d["subjects"][0]["matches_product"] = False
     r, deps, vision, gen = setup(request_data, discovery=d)
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert (
-        result.status == "failed" and not gen.calls and result.error_info.code == "input_mismatch"
-    )
+    assert result.status == "succeeded" and len(gen.calls) == 1
+    assert result.error_info is None and result.input_check is None
 
 
-async def test_ambiguous_no_generation_and_cancel_propagates(request_data):
-    from image_agent.pipeline import run_pipeline
+async def test_identity_warning_allows_generation_and_cancel_propagates(request_data):
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     d = analysis_data()
     d["issues"] = [
@@ -156,14 +156,15 @@ async def test_ambiguous_no_generation_and_cancel_propagates(request_data):
     ]
     r, deps, vision, gen = setup(request_data, discovery=d)
     result = await run_pipeline(r, AgentConfig(), dependencies=deps)
-    assert result.status == "needs_input" and result.error_info is None and not gen.calls
+    assert result.status == "succeeded" and result.error_info is None and len(gen.calls) == 1
+    assert result.warnings
     r, deps, vision, gen = setup(request_data, error=asyncio.CancelledError())
     with pytest.raises(asyncio.CancelledError):
         await run_pipeline(r, AgentConfig(), dependencies=deps)
 
 
 async def test_white_only_uses_export_pixels_and_product_only(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data.update(
         platforms=["pinduoduo"], output_types=["pdd_white_background"], model_preference="female"

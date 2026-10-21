@@ -34,7 +34,7 @@ def test_source_placeholder_regex_compatibility(request_data, name, want):
 
 
 async def test_staged_final_plan_matches_actual_material_references(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     d = analysis_data()
     d["materials"].append(
@@ -91,7 +91,7 @@ def test_primary_subject_reference_precedes_original_subject_order(request_data)
 
 
 async def test_review_ignores_exempt_subjects(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_acceptance import two_subjects
 
     data = two_subjects()
@@ -145,7 +145,7 @@ def test_model_messages_are_redacted_before_export_and_cli():
 
 
 async def test_exempt_subject_does_not_trigger_staged_repair(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_acceptance import two_subjects
 
     data = two_subjects()

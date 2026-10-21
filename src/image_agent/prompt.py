@@ -273,9 +273,32 @@ def build_prompt(request, target, context, plan, mode="standard"):
             parts.append("The model's face must not be visible; honor the requested shot crop.")
         elif target.model_preference != "auto":
             parts.append(f"Use a {target.model_preference} model.")
-    else:
+    elif strict_catalog(target):
         parts.append("Present only the selected products. No model or person.")
+    else:
+        parts.append(
+            "Keep the selected products as the only sellable subjects. No model or person. "
+            "Background design, separate decorative graphics and user-supplied marketing copy "
+            "may complement the product without becoming product parts or included accessories."
+        )
     shot = SHOTS.get(target.variant or "hero", "")
+    if target.output_type == "main_image" and not strict_catalog(target):
+        shot = (
+            "Hero product shot, full product clearly visible and dominant, crisp product focus. "
+            "Choose background, lighting and placement to suit the user's brief and creative "
+            "suggestions; a clean composition need not be an empty studio background."
+        )
+        parts.append(
+            "MAIN IMAGE DESIGN: Use the user's brief and available design suggestions to compose "
+            "one coherent commercial image with room for the product and readable copy. "
+            "When marketing wording or selling points are supplied, select a short headline and "
+            "a few useful selling points or price/promotion labels from that input instead of "
+            "pasting the entire paragraph. Preserve explicitly requested exact text and all "
+            "selected numbers and offer conditions; do not invent claims. Adapt decorative "
+            "elements and text placement to the available space. These are flexible design "
+            "choices, not a required checklist. With sparse suggestions, choose a simple layout; "
+            "without supplied marketing content, do not manufacture copy."
+        )
     if (
         "detail_page" in request.output_types
         and target.variant is None

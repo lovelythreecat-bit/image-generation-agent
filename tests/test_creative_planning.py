@@ -90,7 +90,7 @@ def test_catalog_prompt_omits_scene_palette_and_pose_suggestions(request_data, p
 async def test_pipeline_uses_and_saves_plan_without_promoting_suggestions_to_requirements(
     request_data, tmp_path
 ):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
 
     request_data = request_data | {"creative_brief": "高级感，适合电商", "output_dir": tmp_path}
     request, deps, _, generator = setup(
@@ -107,3 +107,71 @@ async def test_pipeline_uses_and_saves_plan_without_promoting_suggestions_to_req
         r.origin in {"default_identity", "preferred"}
         for r in result.assets[0].element_plan.requirements
     )
+
+
+def test_main_image_brief_can_drive_layout_without_style_hint(request_data):
+    request = CreationRequest(**(request_data | {
+        "platforms": ["taobao"], "output_types": ["main_image"],
+        "creative_brief": '科技感又不失可爱；文案：一握就上分；299元，满200减20',
+        "style_hint": None,
+    }))
+    ctx = context(request)
+    target = build_targets(request, "product_only")[0]
+    plan = compile_element_plan(request, target, ctx, AgentConfig())
+    prompt = build_prompt(request, target, ctx, plan)
+    assert request.creative_brief in prompt
+    assert "studio-grade lighting" not in prompt
+    assert "Present only the selected products." not in prompt
+    assert "MAIN IMAGE DESIGN" in prompt
+    assert "short headline" in prompt
+    assert not plan.constraints
+
+
+@pytest.mark.parametrize("platform,output", [
+    ("amazon", "main_image"), ("pinduoduo", "pdd_white_background"),
+])
+def test_catalog_does_not_receive_main_image_design_guidance(request_data, platform, output):
+    request = CreationRequest(**(request_data | {
+        "platforms": [platform], "output_types": [output],
+    }))
+    ctx = context(request)
+    target = build_targets(request, "product_only")[0]
+    plan = compile_element_plan(request, target, ctx, AgentConfig())
+    prompt = build_prompt(request, target, ctx, plan)
+    assert "MAIN IMAGE DESIGN" not in prompt
+    assert "Present only the selected products." in prompt
+
+
+async def test_discovery_plans_copy_in_existing_suggestions_without_extra_call(request_data):
+    request = CreationRequest(**(request_data | {
+        "creative_brief": "标题：每日一杯；价格299元", "output_types": ["main_image"],
+    }))
+    transport = ScriptTransport([analysis_data()])
+    result = await VisionClient(transport, AgentConfig()).analyze_materials(request, materials())
+    instruction = transport.calls[0][1]["messages"][0]["content"][0]["text"]
+    assert "short headline" in instruction
+    assert "existing composition suggestion" in instruction
+    assert len(transport.calls) == 1
+    assert result.status == "ready"
+
+
+@pytest.mark.parametrize("suggestions", [[], [
+    {"aspect": "mood", "instruction": "科技感又不失可爱", "reason": "贴合用户偏好"},
+]])
+async def test_sparse_design_plan_still_delivers_without_review(request_data, suggestions):
+    from image_agent.pipeline import run_pipeline
+    from tests.test_direct_delivery import forbid_reviews
+
+    data = analysis_data() | {"creative_plan": {
+        "user_requirements": [], "suggestions": suggestions,
+    }}
+    request, deps, vision, generator = setup(request_data | {
+        "output_types": ["main_image"], "creative_brief": "科技感又不失可爱；299元",
+    }, discovery=data)
+    forbid_reviews(vision)
+    result = await run_pipeline(request, AgentConfig(), dependencies=deps)
+    assert result.status == "succeeded"
+    assert len(generator.calls) == 1
+    assert result.assets[0].delivery.mode == "direct"
+    assert not result.assets[0].element_plan.constraints
+    assert result.assets[0].quality is None

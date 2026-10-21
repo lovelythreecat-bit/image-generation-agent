@@ -4,7 +4,6 @@ from image_agent.config import AgentConfig
 from image_agent.errors import AgentError, ProviderError
 from image_agent.models import (
     CreationRequest,
-    EvidenceValidation,
     LoadedMaterial,
     MaterialAnalysis,
     PreparedContext,
@@ -111,7 +110,7 @@ def test_optional_scene_white_excluded_required_conflicts(request_data):
     assert error.value.code == "requirement_conflict"
 
 
-def test_pending_snapshot_can_be_resolved(request_data):
+def test_pending_material_review_becomes_nonblocking_warning(request_data):
     from image_agent.selection import finalize_selection, resolve_selection
 
     d = analysis_data()
@@ -127,20 +126,10 @@ def test_pending_snapshot_can_be_resolved(request_data):
     ]
     r = CreationRequest(**request_data)
     draft = resolve_selection(r, MaterialAnalysis(**d))
-    assert (
-        draft.candidate is not None and len(draft.pending_issues) == 1 and not draft.blocking_issues
-    )
-    assert finalize_selection(draft).status == "needs_input"
-    evidence = EvidenceValidation(
-        outcome="verified",
-        subject_checks=[dict(subject_id="s1", score=90, same_product=True, reason="same")],
-        fact_checks=[dict(fact_id="f1", presence="present", fidelity_score=90, reason="visible")],
-        intent_valid=True,
-        issue_resolutions=[dict(issue_id="conflict", status="resolved", reason="verified")],
-    )
-    assert finalize_selection(draft, evidence).status == "ready"
-    evidence.issue_resolutions[0].status = "unresolved"
-    assert finalize_selection(draft, evidence).status == "needs_input"
+    assert draft.candidate is not None and not draft.pending_issues and not draft.blocking_issues
+    resolution = finalize_selection(draft)
+    assert resolution.status == "ready" and resolution.selection.subject_ids == ["s1"]
+    assert resolution.issue_resolutions[0].status == "irrelevant"
 
 
 def test_explicit_unknown_and_exclusion_semantics(request_data):

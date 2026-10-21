@@ -212,7 +212,7 @@ class LongImageVisionClient(VisionClient):
             draft = resolve_selection(LongProductEvidenceRequest(request), analysis)
             selection = draft.candidate
             source_ready = (
-                analysis.status == "ready"
+                analysis.status != "failed"
                 and analysis.error_info is None
                 and selection is not None
                 and not draft.blocking_issues

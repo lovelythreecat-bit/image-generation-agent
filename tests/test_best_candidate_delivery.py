@@ -6,7 +6,7 @@ from image_agent.config import AgentConfig
 from image_agent.contracts import result_to_bundle
 from image_agent.errors import ProviderError
 from image_agent.execution import ExecutionPolicy
-from image_agent.pipeline import run_pipeline
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_pipeline import setup
 
 

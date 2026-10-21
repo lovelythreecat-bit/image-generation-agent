@@ -5,8 +5,8 @@ from image_agent.contracts import CreationResultDTO, result_to_bundle
 from image_agent.delivery import select_best_available
 from image_agent.execution import ExecutionPolicy
 from image_agent.models import Asset, AssetTarget
-from image_agent.pipeline import run_pipeline
 from image_agent.server.task_service import sanitize_public_model
+from tests.fakes import run_reviewed_pipeline as run_pipeline
 from tests.test_images import picture
 from tests.test_pipeline import setup
 

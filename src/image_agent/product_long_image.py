@@ -489,6 +489,15 @@ class ProductLongImageWorkflow:
         asset.status = "pending_audit"
         nodes.update_asset(state, asset)
         state["phase"] = "long_audit"
+        if not nodes.policy.review_generated_images:
+            from .models import BestAvailableDelivery
+
+            segment.update(status="succeeded", error_info=None)
+            segment["delivery"] = BestAvailableDelivery(
+                mode="direct", candidate_id=candidate_id, sha256=ref["sha256"],
+                stop_reason="generation_completed",
+            ).model_dump(mode="json")
+            self.advance(state)
 
     def advance(self, state):
         runtime = self.runtime(state)

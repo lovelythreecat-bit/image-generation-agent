@@ -119,7 +119,7 @@ async def test_low_confidence_functional_claim_is_not_a_discovery_issue(request_
 
 
 async def test_claims_survive_generation_and_quality_repair(request_data):
-    from image_agent.pipeline import run_pipeline
+    from tests.fakes import run_reviewed_pipeline as run_pipeline
     from tests.test_pipeline import setup
 
     claim = "保温999小时，全网销量第一"

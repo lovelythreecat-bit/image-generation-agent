@@ -13,6 +13,8 @@ from .errors import AgentError, ConfigurationError
 
 class ExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    # Only explicit legacy recovery/review callers opt in; new runs return directly.
+    review_generated_images: bool = False
     max_quality_repairs: int = Field(default=2, ge=0, le=10)
     max_audit_retries: int = Field(default=2, ge=0)
     max_image_calls: int = Field(default=100, ge=0)
