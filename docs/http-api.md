@@ -43,6 +43,26 @@ uv run python -m image_agent.server serve --host 0.0.0.0 --port 8000
 
 `data_dir` 的相对路径以配置文件所在目录为基准；Windows 路径建议使用 `/`。默认并发 `worker_concurrency=1`、队列容量 `queue_capacity=100`、监听地址 `127.0.0.1`、端口 `8000`；图片默认最大 20 MiB、解码最多 6000 万像素，可通过 `max_upload_bytes` 和 `max_image_pixels` 调整。完整可选字段见仓库根目录的 `server.config.example.json`。
 
+Qwen 视觉分析的思考模式由 `server.config.json` 顶层的 `"enable_thinking": false` 控制，省略时也默认关闭；需要开启时设置为 `true` 并重启服务。此开关只向显式 `chat_completions` 服务中的 Qwen 模型传递，不向其他模型或图片生成接口添加该参数。关闭思考可避免复杂素材分析因长时间推理耗尽请求超时，但不保证供应商始终及时响应。
+
+该开关是部署级策略，不属于 HTTP 配置方案的 `parameters`，导入方案不会覆盖它。重启后，新任务、排队任务和恢复任务的后续模型调用均使用当前部署值；改变开关会隔离语义缓存，已有分析快照和已保存结果仍会保留。
+
+缓存同样在部署配置 `server.config.json` 顶层设置，修改后重启载入；HTTP 请求、响应、OpenAPI 和配置方案 `parameters` 不增加缓存字段，现有调用方无需改动。将以下片段合并到已有配置（保留数据库、Token、密钥等必填字段）：
+
+```json
+{
+  "cache_enabled": true,
+  "cache_directory": "./server-data/semantic-cache",
+  "cache_ttl_seconds": 86400,
+  "cache_max_bytes": 67108864,
+  "jpeg_cache_max_bytes": 33554432
+}
+```
+
+示例启用磁盘缓存，同时保留内存缓存；TTL 为 24 小时，语义缓存容量为 64 MiB，JPEG 编码内存缓存为 32 MiB。`cache_directory` 相对配置文件所在目录解析，不受启动工作目录影响。旧配置省略缓存字段时，默认启用内存缓存且不写磁盘；目录设为 `null` 也只使用内存缓存。`cache_enabled` 必须为布尔值，`cache_max_bytes` 必须为正整数，`cache_ttl_seconds` 必须为有限正数；`jpeg_cache_max_bytes` 为非负整数，设为 0 单独停用 JPEG 缓存。`cache_enabled: false` 同时停用两种缓存。
+
+缓存设置由当前部署统一决定，对排队及恢复任务也生效，不改变任务快照中的模型、凭据和其他参数。导入模型配置文件时忽略其中的缓存设置，公开配置查询不返回缓存字段。缓存目录包含内部分析和策划内容，应放在私有目录；任务恢复仍依赖原任务数据与检查点，不依赖缓存。
+
 指定另一份部署配置时，启动、导入和迁移显式使用同一文件；启动参数 `--host/--port` 可覆盖文件值：
 
 ```powershell
@@ -159,3 +179,11 @@ uv run python -m image_agent.server import-config --file examples/config.openai.
 `pdd_white_background` 保留协议枚举名称以兼容历史任务，界面显示“白底图”。支持全部已支持平台，并按请求平台创建目标，不隐式改为拼多多。
 
 商品 `long_image` 结果的 AssetDTO 增加可空 `long_image_review`，绑定最终候选 ID、实际成图 SHA-256、宽高及按拼接顺序排列的分段记录（section_id、status、quality、copy_audit、y/width/height）。仅投影与最终成图摘要一致的候选；不暴露本地路径、素材引用或原始 metadata。`quality=null` 不代表审核缺失，长图使用分段实物与文字审核，不伪造统一 QualityReport；调用方核对完整数量、审核及最终字节。历史无证据长图不被自动认定通过。通用图文长图 CLI/Python 入口不变。
+
+## 生图 API 三次尝试
+
+每张待生成图片最多进行 3 次供应商提交（首次 + 2 次重试），间隔 2 秒、4 秒。HTTP 错误（包括 524）、传输超时、无效 JSON 和损坏图片都会触发下一次尝试；成功后立即停止。本地配置/输入错误、取消和预算耗尽不会强行重试。下载 GET 的有限重试不增加生图 POST 次数。
+
+连续三次失败时，调度状态仍遵守原协议 `status=completed`，业务结果为 `core_status=failed`；结果顶层及失败资产的 `error_info.code=generation_attempts_exhausted`、`retryable=false`。整单停止后续生成，已有图片仍保留。调用方应将此明确的业务失败展示为失败，不再持续轮询或自动重新提交；手动重试应创建新任务。已中断或崩溃且缺少可确认响应的 `generation_uncertain` 继续按原恢复保护处理，不能用三次失败规则推断其完成状态。
+
+`usage.image_calls` 按每次实际 POST 计数，内部运行日志 `operations.json` 的 `attempt_history` 记录每次耗时、结果和错误码。超时重试可能导致供应商重复计费；最终失败表示本任务未获取有效图片，不保证上游没有生成或收费。

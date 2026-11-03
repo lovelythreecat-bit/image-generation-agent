@@ -26,8 +26,7 @@ def evidence_response(subject_ids=("s1",)):
     return dict(
         outcome="verified",
         subject_checks=[
-            dict(subject_id=s, score=95, same_product=True, reason="same")
-            for s in subject_ids
+            dict(subject_id=s, score=95, same_product=True, reason="same") for s in subject_ids
         ],
         intent_valid=True,
         issue_resolutions=[],

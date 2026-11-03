@@ -3,11 +3,11 @@
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
+
 from image_agent.config import AgentConfig
 from image_agent.models import CreationRequest, MaterialAnalysis
 from image_agent.vision import VisionClient
-from pydantic import ValidationError
-
 from tests.fakes import analysis_data
 from tests.test_vision import ScriptTransport, materials
 
@@ -239,7 +239,6 @@ async def test_merged_content_reaches_generation_and_saved_result(tmp_path, outp
     from pathlib import Path
 
     from image_agent.pipeline import run_pipeline
-
     from tests.test_pipeline import setup
 
     data = analysis_data()

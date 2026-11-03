@@ -6,8 +6,12 @@ from fastapi.testclient import TestClient
 def make_app(tmp_path, prefix=""):
     from image_agent.server.app import create_app
     from image_agent.server.settings import ServerSettings
-    return create_app(ServerSettings("sqlite+aiosqlite://", "docs-token-private", "unused", tmp_path,
-                                     root_path=prefix))
+
+    return create_app(
+        ServerSettings(
+            "sqlite+aiosqlite://", "docs-token-private", "unused", tmp_path, root_path=prefix
+        )
+    )
 
 
 def test_documentation_public_and_business_security(tmp_path):
@@ -36,20 +40,32 @@ def test_openapi_has_actual_routes_upload_download_and_write_only_keys(tmp_path)
     schema = TestClient(make_app(tmp_path)).get("/openapi.json").json()
     paths = schema["paths"]
     expected = {
-        "/api/v1/services": {"get", "post"}, "/api/v1/services/{identifier}": {"get", "patch", "delete"},
-        "/api/v1/model-configs": {"get", "post"}, "/api/v1/model-configs/{identifier}": {"get", "patch", "delete"},
-        "/api/v1/agent-configs": {"get", "post"}, "/api/v1/agent-configs/{identifier}": {"get", "patch", "delete"},
-        "/api/v1/media": {"post"}, "/api/v1/tasks": {"post"}, "/api/v1/tasks/{id}": {"get"},
-        "/api/v1/tasks/{id}/result": {"get"}, "/api/v1/tasks/{id}/blobs/{blob_id}": {"get"},
-        "/api/v1/tasks/{id}/resume": {"post"}, "/api/v1/tasks/{id}/accept": {"post"},
+        "/api/v1/services": {"get", "post"},
+        "/api/v1/services/{identifier}": {"get", "patch", "delete"},
+        "/api/v1/model-configs": {"get", "post"},
+        "/api/v1/model-configs/{identifier}": {"get", "patch", "delete"},
+        "/api/v1/agent-configs": {"get", "post"},
+        "/api/v1/agent-configs/{identifier}": {"get", "patch", "delete"},
+        "/api/v1/media": {"post"},
+        "/api/v1/tasks": {"post"},
+        "/api/v1/tasks/{id}": {"get"},
+        "/api/v1/tasks/{id}/result": {"get"},
+        "/api/v1/tasks/{id}/blobs/{blob_id}": {"get"},
+        "/api/v1/tasks/{id}/resume": {"post"},
+        "/api/v1/tasks/{id}/accept": {"post"},
     }
     for path, methods in expected.items():
         assert methods <= paths[path].keys()
     assert "multipart/form-data" in paths["/api/v1/media"]["post"]["requestBody"]["content"]
     submit = paths["/api/v1/tasks"]["post"]
     assert "202" in submit["responses"]
-    assert any(p["name"].lower() == "idempotency-key" and p["required"] for p in submit["parameters"])
-    assert "image/png" in paths["/api/v1/tasks/{id}/blobs/{blob_id}"]["get"]["responses"]["200"]["content"]
+    assert any(
+        p["name"].lower() == "idempotency-key" and p["required"] for p in submit["parameters"]
+    )
+    assert (
+        "image/png"
+        in paths["/api/v1/tasks/{id}/blobs/{blob_id}"]["get"]["responses"]["200"]["content"]
+    )
     for definition in schema["components"]["schemas"].values():
         props = definition.get("properties", {})
         assert "api_key_encrypted" not in props

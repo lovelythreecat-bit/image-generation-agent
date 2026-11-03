@@ -110,11 +110,17 @@ async def test_pipeline_uses_and_saves_plan_without_promoting_suggestions_to_req
 
 
 def test_main_image_brief_can_drive_layout_without_style_hint(request_data):
-    request = CreationRequest(**(request_data | {
-        "platforms": ["taobao"], "output_types": ["main_image"],
-        "creative_brief": '科技感又不失可爱；文案：一握就上分；299元，满200减20',
-        "style_hint": None,
-    }))
+    request = CreationRequest(
+        **(
+            request_data
+            | {
+                "platforms": ["taobao"],
+                "output_types": ["main_image"],
+                "creative_brief": "科技感又不失可爱；文案：一握就上分；299元，满200减20",
+                "style_hint": None,
+            }
+        )
+    )
     ctx = context(request)
     target = build_targets(request, "product_only")[0]
     plan = compile_element_plan(request, target, ctx, AgentConfig())
@@ -127,13 +133,23 @@ def test_main_image_brief_can_drive_layout_without_style_hint(request_data):
     assert not plan.constraints
 
 
-@pytest.mark.parametrize("platform,output", [
-    ("amazon", "main_image"), ("pinduoduo", "pdd_white_background"),
-])
+@pytest.mark.parametrize(
+    "platform,output",
+    [
+        ("amazon", "main_image"),
+        ("pinduoduo", "pdd_white_background"),
+    ],
+)
 def test_catalog_does_not_receive_main_image_design_guidance(request_data, platform, output):
-    request = CreationRequest(**(request_data | {
-        "platforms": [platform], "output_types": [output],
-    }))
+    request = CreationRequest(
+        **(
+            request_data
+            | {
+                "platforms": [platform],
+                "output_types": [output],
+            }
+        )
+    )
     ctx = context(request)
     target = build_targets(request, "product_only")[0]
     plan = compile_element_plan(request, target, ctx, AgentConfig())
@@ -143,9 +159,15 @@ def test_catalog_does_not_receive_main_image_design_guidance(request_data, platf
 
 
 async def test_discovery_plans_copy_in_existing_suggestions_without_extra_call(request_data):
-    request = CreationRequest(**(request_data | {
-        "creative_brief": "标题：每日一杯；价格299元", "output_types": ["main_image"],
-    }))
+    request = CreationRequest(
+        **(
+            request_data
+            | {
+                "creative_brief": "标题：每日一杯；价格299元",
+                "output_types": ["main_image"],
+            }
+        )
+    )
     transport = ScriptTransport([analysis_data()])
     result = await VisionClient(transport, AgentConfig()).analyze_materials(request, materials())
     instruction = transport.calls[0][1]["messages"][0]["content"][0]["text"]
@@ -155,19 +177,33 @@ async def test_discovery_plans_copy_in_existing_suggestions_without_extra_call(r
     assert result.status == "ready"
 
 
-@pytest.mark.parametrize("suggestions", [[], [
-    {"aspect": "mood", "instruction": "科技感又不失可爱", "reason": "贴合用户偏好"},
-]])
+@pytest.mark.parametrize(
+    "suggestions",
+    [
+        [],
+        [
+            {"aspect": "mood", "instruction": "科技感又不失可爱", "reason": "贴合用户偏好"},
+        ],
+    ],
+)
 async def test_sparse_design_plan_still_delivers_without_review(request_data, suggestions):
     from image_agent.pipeline import run_pipeline
     from tests.test_direct_delivery import forbid_reviews
 
-    data = analysis_data() | {"creative_plan": {
-        "user_requirements": [], "suggestions": suggestions,
-    }}
-    request, deps, vision, generator = setup(request_data | {
-        "output_types": ["main_image"], "creative_brief": "科技感又不失可爱；299元",
-    }, discovery=data)
+    data = analysis_data() | {
+        "creative_plan": {
+            "user_requirements": [],
+            "suggestions": suggestions,
+        }
+    }
+    request, deps, vision, generator = setup(
+        request_data
+        | {
+            "output_types": ["main_image"],
+            "creative_brief": "科技感又不失可爱；299元",
+        },
+        discovery=data,
+    )
     forbid_reviews(vision)
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
     assert result.status == "succeeded"

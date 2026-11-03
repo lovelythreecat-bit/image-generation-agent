@@ -103,6 +103,7 @@ class CandidateDTO(Model):
 
 class LongImageSectionReview(Model):
     """Public review of a complete section, with no local storage references."""
+
     section_id: str = Field(min_length=1)
     status: AssetStatus
     quality: QualityReport | None = None
@@ -193,10 +194,13 @@ def _long_image_review(asset):
     if asset.output_type != "long_image" or asset.image is None:
         return None
     digest = hashlib.sha256(asset.image).hexdigest()
-    chosen_id = (asset.delivery.candidate_id if asset.delivery else
-                 next((c['candidate_id'] for c in asset.candidates if c.get('selected')), None))
+    chosen_id = (
+        asset.delivery.candidate_id
+        if asset.delivery
+        else next((c["candidate_id"] for c in asset.candidates if c.get("selected")), None)
+    )
     for candidate in reversed(asset.candidates):
-        if chosen_id is not None and candidate['candidate_id'] != chosen_id:
+        if chosen_id is not None and candidate["candidate_id"] != chosen_id:
             continue
         if candidate.get("status") == "stage" or candidate.get("sha256") != digest:
             continue
@@ -207,14 +211,23 @@ def _long_image_review(asset):
         if len(segments) != len(boundaries):
             continue
         return LongImageReview(
-            candidate_id=candidate["candidate_id"], sha256=digest,
-            width=metadata["width"], height=metadata["height"],
-            sections=[LongImageSectionReview(
-                section_id=section["section_id"], status=section["status"],
-                quality=section.get("quality"), copy_audit=section.get("copy_audit"),
-                delivery=section.get('delivery'),
-                y=boundary["y"], width=boundary["width"], height=boundary["height"],
-            ) for section, boundary in zip(segments, boundaries, strict=True)],
+            candidate_id=candidate["candidate_id"],
+            sha256=digest,
+            width=metadata["width"],
+            height=metadata["height"],
+            sections=[
+                LongImageSectionReview(
+                    section_id=section["section_id"],
+                    status=section["status"],
+                    quality=section.get("quality"),
+                    copy_audit=section.get("copy_audit"),
+                    delivery=section.get("delivery"),
+                    y=boundary["y"],
+                    width=boundary["width"],
+                    height=boundary["height"],
+                )
+                for section, boundary in zip(segments, boundaries, strict=True)
+            ],
         )
     return None
 

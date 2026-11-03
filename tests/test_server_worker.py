@@ -48,16 +48,17 @@ async def test_real_core_delivery_retains_quality_status_and_blobs(service, core
     await once(service)
     state = await service.get_task(task["task_id"])
     assert state["status"] == "completed"
-    assert state['core_status'] == 'succeeded'
+    assert state["core_status"] == "succeeded"
     result = await service.get_result(task["task_id"])
-    assert result['status'] == 'succeeded'
-    assert result['assets'][0]['quality']['passed'] is False
-    assert result['assets'][0]['delivery']['mode'] == 'best_available'
+    assert result["status"] == "succeeded"
+    assert result["assets"][0]["quality"]["passed"] is False
+    assert result["assets"][0]["delivery"]["mode"] == "best_available"
     blob_id = result["assets"][0]["blob_id"]
     data, mime = await service.blob(task["task_id"], blob_id)
     assert data and mime == "image/png"
     from hashlib import sha256
-    assert result['assets'][0]['delivery']['sha256'] == sha256(data).hexdigest()
+
+    assert result["assets"][0]["delivery"]["sha256"] == sha256(data).hexdigest()
     with pytest.raises(Exception) as caught:
         await service.blob(task["task_id"], "../private")
     assert caught.value.status_code == 404
@@ -276,9 +277,9 @@ async def test_completed_scheduler_retains_core_input_and_budget_states(
         data["issues"] = [
             {
                 "issue_id": "mixed",
-                "code": "conflicting_identity",
-                "resolution": "reanalyze",
-                "message": "replace mixed image",
+                "code": "ambiguous_subject",
+                "resolution": "selection",
+                "message": "choose the intended subject",
                 "subject_ids": ["s1"],
             }
         ]

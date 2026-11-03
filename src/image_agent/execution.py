@@ -159,6 +159,18 @@ class BudgetLedger:
 _current_call = ContextVar("image_agent_call", default=None)
 
 
+def cache_budget_domain():
+    """Share work only under equal limits and the same optional shared budget."""
+    scope = _current_call.get()
+    if scope is None:
+        return None
+    ledger, kind, _, _ = scope
+    policy = ledger.policy.model_dump(mode="json")
+    if ledger.policy.shared_ledger_path:
+        policy["shared_ledger_path"] = str(ledger.policy.shared_ledger_path.resolve())
+    return {"kind": kind, "policy": policy}
+
+
 @contextmanager
 def call_scope(ledger, kind, journal=None, operation=None):
     token = _current_call.set((ledger, kind, journal, operation))
@@ -176,3 +188,27 @@ def reserve_post():
         if journal is not None and operation is not None:
             journal.mark_operation(operation, "submitted")
     return scope[1] if scope else None
+
+
+def record_image_attempt(attempt, elapsed_seconds, error=None):
+    """Persist every completed generation attempt without prompts or response bodies."""
+    scope = _current_call.get()
+    if scope is None or scope[1] != "image":
+        return
+    _, _, journal, operation = scope
+    if journal is None or operation is None:
+        return
+    row = journal.operation(operation) or {}
+    history = list(row.get("attempt_history", []))
+    history.append(
+        {
+            "attempt": attempt,
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "outcome": "failed" if error else "succeeded",
+            "error_code": error.code if error else None,
+            "status_code": error.status_code if error else None,
+        }
+    )
+    operations = journal.json("operations.json") if journal.exists("operations.json") else {}
+    operations[operation] = row | {"attempt_history": history}
+    journal.json("operations.json", operations)

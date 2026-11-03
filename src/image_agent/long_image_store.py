@@ -211,7 +211,10 @@ class LongImageRunStore(RunStore):
         their contents; neither check grants trust to a planning descriptor.
         """
         string_fields = (
-            "run_id", "request_hash", "request_fingerprint", "policy_fingerprint",
+            "run_id",
+            "request_hash",
+            "request_fingerprint",
+            "policy_fingerprint",
             "config_fingerprint",
         )
         if any(not isinstance(meta.get(k), str) or not meta[k].strip() for k in string_fields):

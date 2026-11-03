@@ -9,6 +9,7 @@ from image_agent.errors import ProviderError
 from image_agent.generate import ImageGenerator
 from image_agent.models import GenerationReference
 from image_agent.transport import HttpTransport
+from tests.test_images import picture
 from tests.test_service_config import deployment
 
 
@@ -58,7 +59,8 @@ async def test_decode_diagnostics_retain_request_context_and_are_serializable(mo
     for secret in ("image-only", "vision-only", "private prompt", "private image"):
         assert secret not in json.dumps(info)
     assert info["retryable"] is False
-    assert len(calls) == 1
+    assert info["code"] == "generation_attempts_exhausted"
+    assert len(calls) == 3
 
 
 @pytest.mark.parametrize("references", [(), (b"first-image", b"second-image")])
@@ -69,7 +71,7 @@ async def test_official_image_wire_format(monkeypatch, references):
     def handler(request):
         calls.append(request)
         return httpx.Response(
-            200, json={"data": [{"b64_json": base64.b64encode(b"result").decode()}]}
+            200, json={"data": [{"b64_json": base64.b64encode(picture((32, 32))).decode()}]}
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -86,7 +88,7 @@ async def test_official_image_wire_format(monkeypatch, references):
                 for i, data in enumerate(references)
             ),
         )
-    assert image == b"result" and len(calls) == 1
+    assert image == picture((32, 32)) and len(calls) == 1
     request = calls[0]
     assert request.headers["authorization"] == "Bearer image-only"
     assert request.url.host == "image.example"
@@ -173,7 +175,9 @@ async def test_compatible_router_custom_endpoint_uses_configured_model(monkeypat
 
     def handler(request):
         calls.append(request)
-        return httpx.Response(200, json={"data": [{"b64_json": "aW1hZ2U="}]})
+        return httpx.Response(
+            200, json={"data": [{"b64_json": base64.b64encode(picture((32, 32))).decode()}]}
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         generator = ImageGenerator(
@@ -182,16 +186,13 @@ async def test_compatible_router_custom_endpoint_uses_configured_model(monkeypat
             alias="fast",
             encoder=lambda data, limit: data,
         )
-        assert (
-            await generator.generate(
-                prompt="cup",
-                model=config.model_name("fast"),
-                size="2K",
-                aspect_ratio="1:1",
-                references=(),
-            )
-            == b"image"
-        )
+        assert await generator.generate(
+            prompt="cup",
+            model=config.model_name("fast"),
+            size="2K",
+            aspect_ratio="1:1",
+            references=(),
+        ) == picture((32, 32))
     assert len(calls) == 1
     assert str(calls[0].url) == "https://image.example/v1/custom/generate"
     assert calls[0].headers["authorization"] == "Bearer image-only"

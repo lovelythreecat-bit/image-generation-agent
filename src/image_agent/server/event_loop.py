@@ -1,4 +1,5 @@
 """Use buffered-protocol-compatible sockets for asyncmy on Windows."""
+
 import asyncio
 
 

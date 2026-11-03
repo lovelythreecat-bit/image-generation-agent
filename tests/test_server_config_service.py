@@ -77,6 +77,32 @@ async def test_roundtrip_config_and_encrypted_snapshot(config_service, monkeypat
     assert image["has_api_key"] is True
 
 
+async def test_historical_cache_parameters_are_not_public(config_service):
+    from image_agent.server.db_models import AgentConfigRecord
+    from image_agent.server.schemas import AgentConfigRead
+    from image_agent.server.settings import CACHE_FIELDS
+
+    *_, agent = await graph(config_service)
+    original = agent["parameters"].copy()
+    async with config_service.session_factory() as session:
+        row = await session.get(AgentConfigRecord, agent["id"])
+        row.parameters = original | dict(
+            cache_enabled=False,
+            cache_directory="private/cache",
+            cache_max_bytes=1024,
+            cache_ttl_seconds=10,
+            jpeg_cache_max_bytes=0,
+        )
+        await session.commit()
+    for public in [
+        await config_service.get_agent_config(agent["id"]),
+        *(await config_service.list_agent_configs()),
+    ]:
+        assert public["parameters"] == original
+        assert not CACHE_FIELDS.intersection(public["parameters"])
+        AgentConfigRead.model_validate(public)
+
+
 async def test_reference_version_and_secret_patch(config_service):
     image, _, im, _, agent = await graph(config_service)
     for action in (

@@ -36,7 +36,7 @@ async def test_details_inherit_approved_main_and_keep_original_evidence(request_
 @pytest.mark.parametrize(
     "platform,main_scores", [("amazon", {}), ("taobao", {"visual_quality": 69})]
 )
-async def test_catalog_or_failed_main_uses_approved_scene_as_anchor(
+async def test_catalog_uses_scene_and_best_available_main_preserves_continuity(
     request_data, platform, main_scores
 ):
     request, deps, _, _ = setup(
@@ -45,9 +45,15 @@ async def test_catalog_or_failed_main_uses_approved_scene_as_anchor(
     )
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
     assert not continuity_bindings(result.assets[0])
-    assert not continuity_bindings(result.assets[1])
-    for asset in result.assets[2:]:
-        assert [b.stage_id for b in continuity_bindings(asset)] == [f"shoot-{platform}-scene"]
+    if platform == "amazon":
+        assert not continuity_bindings(result.assets[1])
+        for asset in result.assets[2:]:
+            assert [b.stage_id for b in continuity_bindings(asset)] == [f"shoot-{platform}-scene"]
+    else:
+        assert result.assets[0].delivery.mode == "best_available"
+        assert not result.assets[0].quality.passed
+        for asset in result.assets[1:]:
+            assert [b.stage_id for b in continuity_bindings(asset)] == [f"shoot-{platform}-main"]
 
 
 async def test_detail_only_set_establishes_scene_anchor(request_data):

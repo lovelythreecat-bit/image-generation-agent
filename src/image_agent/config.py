@@ -113,6 +113,12 @@ class AgentConfig(Model):
     generation_reference_limit: int = Field(default=4, gt=0)
     vision_image_limit: int = Field(default=12, gt=0)
     model_completion_attempts: int = Field(default=4, ge=1, le=8)
+    enable_thinking: bool = False
+    cache_enabled: bool = True
+    cache_directory: str | None = None
+    cache_max_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
+    cache_ttl_seconds: float = Field(default=86400, gt=0, allow_inf_nan=False)
+    jpeg_cache_max_bytes: int = Field(default=32 * 1024 * 1024, ge=0)
 
     @model_validator(mode="after")
     def defaults(self):
@@ -178,7 +184,8 @@ class AgentConfig(Model):
         retired = self.stages.get("validate_evidence")
         used = self.service_names() | {r.service for r in self.image_models.values()}
         return {
-            name: service for name, service in self.services.items()
+            name: service
+            for name, service in self.services.items()
             if retired is None or name != retired.service or name in used
         }
 

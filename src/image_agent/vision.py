@@ -9,6 +9,7 @@ from typing import Annotated, get_args, get_origin
 from pydantic import BaseModel, ValidationError
 
 from .appearance import PRODUCT_APPEARANCE_AUDIT, PRODUCT_APPEARANCE_POLICY, SOURCE_VIEW_POLICY
+from .cache import SemanticCache, cached_jpeg
 from .errors import ProviderError
 from .images import encode_jpeg
 from .marketing import MARKETING_POLICY, creative_input
@@ -175,8 +176,28 @@ def selected_fact_ids(analysis, selection):
 class VisionClient:
     def __init__(self, transport, config):
         self.transport, self.config = transport, config
+        self.cache = SemanticCache(config, transport)
 
     async def plan_product_long_image(self, request, target, context):
+        from .product_long_image import (
+            product_long_image_fingerprint,
+            validate_product_long_image_plan,
+        )
+        from .product_long_image_models import ProductLongImagePlan
+
+        return await self.cache.run(
+            "plan_product_long_image",
+            {
+                "fingerprint": product_long_image_fingerprint(request, target, context),
+                "target": target,
+                "context": context,
+            },
+            lambda: self._plan_product_long_image(request, target, context),
+            schema=ProductLongImagePlan,
+            validate=lambda plan: validate_product_long_image_plan(request, target, context, plan),
+        )
+
+    async def _plan_product_long_image(self, request, target, context):
         from .product_long_image import (
             selected_product_evidence,
             validate_product_long_image_plan,
@@ -301,7 +322,13 @@ class VisionClient:
             }
         ]
         for label, data in images:
-            encoded = await compute(encode_jpeg, data, max_px)
+            encoded = await compute(
+                cached_jpeg,
+                encode_jpeg,
+                data,
+                max_px,
+                self.config.jpeg_cache_max_bytes if self.config.cache_enabled else 0,
+            )
             content.extend(
                 [
                     {"type": "text", "text": label},
@@ -315,10 +342,15 @@ class VisionClient:
             )
         transport, path = self.transport, "/chat/completions"
         route = self.config.vision_route(stage)
+        thinking_options = {}
         if route:
             service = self.config.services[route.service]
             transport, path = self.transport.for_service(route.service), service.chat_path
             model = route.model
+            if service.protocol == "chat_completions" and model.rsplit("/", 1)[
+                -1
+            ].casefold().startswith("qwen"):
+                thinking_options["enable_thinking"] = self.config.enable_thinking
         completing = stage in COMPLETION_STAGES
         attempts = self.config.model_completion_attempts if completing else 2
         call_id = uuid.uuid4().hex
@@ -332,6 +364,7 @@ class VisionClient:
                     model=model or self.config.quality_model,
                     messages=[{"role": "user", "content": content}],
                     response_format={"type": "json_object"},
+                    **thinking_options,
                 ),
             )
             result = None
@@ -606,6 +639,14 @@ class VisionClient:
         return result
 
     async def extract_garments(self, request, materials, subject_id):
+        return await self.cache.run(
+            "extract_garments",
+            {"materials": materials, "subject_id": subject_id},
+            lambda: self._extract_garments(request, materials, subject_id),
+            schema=GarmentStructureAudit,
+        )
+
+    async def _extract_garments(self, request, materials, subject_id):
         return await self._call(
             GarmentStructureAudit,
             f"Extract only visible garment facts for subject {subject_id}: count, types, colors, material, pattern, neckline, sleeves, closures, pockets, waistband, length, silhouette, logos and distinctive details. No invisible inferences. "
@@ -615,6 +656,13 @@ class VisionClient:
         )
 
     async def describe_style(self, request, references):
+        return await self.cache.run(
+            "describe_style",
+            {"references": references},
+            lambda: self._describe_style(request, references),
+        )
+
+    async def _describe_style(self, request, references):
         models = (
             [None]
             if self.config.services
@@ -696,8 +744,9 @@ class VisionClient:
                     "target": target.model_dump(),
                     "plan": plan.model_dump(),
                     "identity_evidence": [
-                        {'subject_id': s.subject_id, 'material_ids': s.material_ids}
-                        for s in context.analysis.subjects if s.subject_id in plan.subject_ids
+                        {"subject_id": s.subject_id, "material_ids": s.material_ids}
+                        for s in context.analysis.subjects
+                        if s.subject_id in plan.subject_ids
                     ],
                     "user_input": creative_input(request),
                 },

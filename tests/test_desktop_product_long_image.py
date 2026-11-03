@@ -334,12 +334,19 @@ def test_product_long_progress_uses_localized_stage(app, stage):
 
 def test_long_image_failure_notice_locates_section_and_retains_specific_copy_error(app, tmp_path):
     saved = long_result(tmp_path, status="quality_failed")
-    saved.assets[0].candidates[0]["metadata"] = {"segments": [
-        {"status": "succeeded"},
-        {"status": "quality_failed", "copy_audit": {
-            "passed": False, "text_matches": False, "issues": ["缺少指定文字：无线连接"]
-        }},
-    ]}
+    saved.assets[0].candidates[0]["metadata"] = {
+        "segments": [
+            {"status": "succeeded"},
+            {
+                "status": "quality_failed",
+                "copy_audit": {
+                    "passed": False,
+                    "text_matches": False,
+                    "issues": ["缺少指定文字：无线连接"],
+                },
+            },
+        ]
+    }
     app.show_result(saved)
     assert "第 2 段" in app.asset_notice.cget("text")
     assert "无线连接" in app.asset_notice.cget("text")

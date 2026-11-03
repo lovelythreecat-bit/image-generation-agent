@@ -1,4 +1,5 @@
 """File-based deployment settings, CLI consumers and offline migrations."""
+
 import io
 import json
 from pathlib import Path
@@ -14,14 +15,19 @@ def server_config(tmp_path):
 
     path = tmp_path / "deployment" / "server.config.json"
     path.parent.mkdir()
-    path.write_text(json.dumps({
-        "database_url": "mysql+asyncmy://app:db-private@localhost/image_agent",
-        "token": "token-private",
-        "secret_key": Fernet.generate_key().decode(),
-        "data_dir": "./data",
-        "host": "0.0.0.0",
-        "port": 8123,
-    }), encoding="utf-8-sig")
+    path.write_text(
+        json.dumps(
+            {
+                "database_url": "mysql+asyncmy://app:db-private@localhost/image_agent",
+                "token": "token-private",
+                "secret_key": Fernet.generate_key().decode(),
+                "data_dir": "./data",
+                "host": "0.0.0.0",
+                "port": 8123,
+            }
+        ),
+        encoding="utf-8-sig",
+    )
     return path
 
 
@@ -34,16 +40,53 @@ def test_file_settings_ignore_environment_and_resolve_paths(server_config, monke
     assert settings.port == 8123
     assert settings.data_dir == server_config.parent / "data"
     assert settings.worker_concurrency == 1
+    assert settings.cache_enabled is True and settings.cache_directory is None
+    assert settings.cache_ttl_seconds == 86400
+    assert settings.cache_max_bytes == 64 * 1024 * 1024
+    assert settings.jpeg_cache_max_bytes == 32 * 1024 * 1024
     assert "db-private" not in repr(settings) and "token-private" not in repr(settings)
 
 
-@pytest.mark.parametrize("change", [
-    {"database_url": "sqlite:///private.db"}, {"database_url": "mysql+asyncmy:///db"},
-    {"token": " "}, {"secret_key": "private-invalid-key"}, {"data_dir": ""},
-    {"data_dir": 42}, {"port": True}, {"port": "8000"}, {"port": 70000},
-    {"worker_concurrency": 0}, {"root_path": 5}, {"host": []},
-    {"unknown_private_field": "private-value"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"database_url": "sqlite:///private.db"},
+        {"database_url": "mysql+asyncmy:///db"},
+        {"token": " "},
+        {"secret_key": "private-invalid-key"},
+        {"data_dir": ""},
+        {"data_dir": 42},
+        {"port": True},
+        {"port": "8000"},
+        {"port": 70000},
+        {"worker_concurrency": 0},
+        {"root_path": 5},
+        {"host": []},
+        {"unknown_private_field": "private-value"},
+        {"cache_enabled": "true"},
+        {"cache_enabled": 1},
+        {"cache_enabled": None},
+        {"cache_directory": " "},
+        {"cache_directory": 123},
+        {"cache_directory": []},
+        {"cache_max_bytes": 0},
+        {"cache_max_bytes": True},
+        {"cache_max_bytes": "1024"},
+        {"cache_max_bytes": 1.5},
+        {"cache_max_bytes": None},
+        {"cache_ttl_seconds": 0},
+        {"cache_ttl_seconds": -1},
+        {"cache_ttl_seconds": True},
+        {"cache_ttl_seconds": "30"},
+        {"cache_ttl_seconds": float("inf")},
+        {"cache_ttl_seconds": float("nan")},
+        {"cache_ttl_seconds": None},
+        {"jpeg_cache_max_bytes": -1},
+        {"jpeg_cache_max_bytes": True},
+        {"jpeg_cache_max_bytes": 1.5},
+        {"jpeg_cache_max_bytes": "1024"},
+    ],
+)
 def test_invalid_file_fields_fail_without_exposing_values(server_config, change):
     mapping = json.loads(server_config.read_text("utf-8-sig"))
     mapping.update(change)
@@ -51,6 +94,29 @@ def test_invalid_file_fields_fail_without_exposing_values(server_config, change)
     with pytest.raises(ValueError) as caught:
         ServerSettings.from_file(server_config)
     assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize("directory", ["./server-data/semantic-cache", None, "absolute"])
+def test_deployment_cache_paths_and_values(server_config, monkeypatch, tmp_path, directory):
+    if directory == "absolute":
+        directory = str(tmp_path / "absolute-cache")
+    values = json.loads(server_config.read_text("utf-8-sig"))
+    values.update(
+        cache_enabled=False,
+        cache_directory=directory,
+        cache_ttl_seconds=0.5,
+        cache_max_bytes=1024,
+        jpeg_cache_max_bytes=0,
+    )
+    server_config.write_text(json.dumps(values), "utf-8")
+    monkeypatch.chdir(tmp_path)
+    settings = ServerSettings.from_file(server_config)
+    assert settings.cache_directory == (
+        (server_config.parent / directory).resolve() if directory is not None else None
+    )
+    assert settings.cache_enabled is False
+    assert settings.cache_ttl_seconds == 0.5
+    assert settings.cache_max_bytes == 1024 and settings.jpeg_cache_max_bytes == 0
 
 
 @pytest.mark.parametrize("content", ["{bad-private-json", "[]", "{}", '{"token":"a","token":"b"}'])
@@ -63,10 +129,19 @@ def test_missing_or_malformed_file_never_falls_back_to_environment(server_config
         ServerSettings.from_file(server_config)
 
 
-@pytest.mark.parametrize("arguments", [[], ["serve"], ["--config", "custom.json"],
-    ["serve", "--config", "custom.json", "--host", "127.0.0.1", "--port", "8234"]])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["serve"],
+        ["--config", "custom.json"],
+        ["serve", "--config", "custom.json", "--host", "127.0.0.1", "--port", "8234"],
+    ],
+)
 def test_serve_uses_default_or_explicit_file_and_cli_overrides(
-    server_config, monkeypatch, arguments,
+    server_config,
+    monkeypatch,
+    arguments,
 ):
     import uvicorn
 
@@ -89,8 +164,9 @@ def test_serve_uses_default_or_explicit_file_and_cli_overrides(
     assert options["workers"] == 1
     import sys
 
-    assert options['loop'] == ('image_agent.server.event_loop:selector_loop_factory'
-                               if sys.platform == 'win32' else 'auto')
+    assert options["loop"] == (
+        "image_agent.server.event_loop:selector_loop_factory" if sys.platform == "win32" else "auto"
+    )
 
 
 def test_uvicorn_loads_buffered_protocol_compatible_event_loop():
@@ -98,8 +174,9 @@ def test_uvicorn_loads_buffered_protocol_compatible_event_loop():
 
     from uvicorn import Config
 
-    factory = Config('unused:app',
-        loop='image_agent.server.event_loop:selector_loop_factory').get_loop_factory()
+    factory = Config(
+        "unused:app", loop="image_agent.server.event_loop:selector_loop_factory"
+    ).get_loop_factory()
     loop = factory()
     try:
         assert isinstance(loop, asyncio.SelectorEventLoop)
@@ -108,7 +185,9 @@ def test_uvicorn_loads_buffered_protocol_compatible_event_loop():
 
 
 def test_cli_missing_file_reports_actionable_error_without_environment_fallback(
-    tmp_path, monkeypatch, capsys,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ):
     from image_agent.server.__main__ import main
 
@@ -124,8 +203,11 @@ def test_alembic_offline_uses_same_file(server_config, monkeypatch, explicit):
     from alembic.config import Config
 
     monkeypatch.chdir(server_config.parent if not explicit else server_config.parent.parent)
-    monkeypatch.setattr(context, "get_x_argument", lambda **kwargs:
-                        {"config": str(server_config)} if explicit else {})
+    monkeypatch.setattr(
+        context,
+        "get_x_argument",
+        lambda **kwargs: {"config": str(server_config)} if explicit else {},
+    )
     output = io.StringIO()
     config = Config(str(Path(__file__).parents[1] / "server-alembic.ini"), output_buffer=output)
     command.upgrade(config, "head", sql=True)
@@ -148,6 +230,18 @@ def test_import_command_passes_file_settings_to_real_database_layer(server_confi
         raise RuntimeError("stop before connecting")
 
     monkeypatch.setattr(Database, "__init__", lambda self, url: database(url))
-    assert cli.main(["import-config", "--config", str(server_config),
-                     "--file", str(source), "--name", "方案"]) == 1
+    assert (
+        cli.main(
+            [
+                "import-config",
+                "--config",
+                str(server_config),
+                "--file",
+                str(source),
+                "--name",
+                "方案",
+            ]
+        )
+        == 1
+    )
     assert connections == ["mysql+asyncmy://app:db-private@localhost/image_agent"]

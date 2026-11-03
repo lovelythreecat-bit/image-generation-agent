@@ -308,7 +308,6 @@
       "required": [
         "proposal",
         "constraints",
-        "focus_element_ids",
         "unmet_requirements"
       ],
       "title": "IntentAnalysis",

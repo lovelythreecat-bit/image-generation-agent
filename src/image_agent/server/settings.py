@@ -1,9 +1,22 @@
 """Explicit startup configuration and safe public service errors."""
+
 import json
+import math
 import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
+
+CACHE_FIELDS = frozenset(
+    {
+        "cache_enabled",
+        "cache_directory",
+        "cache_max_bytes",
+        "cache_ttl_seconds",
+        "jpeg_cache_max_bytes",
+    }
+)
+DEPLOYMENT_FIELDS = CACHE_FIELDS | {"enable_thinking"}
 
 
 def _unique_object(pairs):
@@ -36,23 +49,63 @@ class ServerSettings:
     port: int = 8000
     max_upload_bytes: int = 20 * 1024 * 1024
     max_image_pixels: int = 60_000_000
+    enable_thinking: bool = False
+    cache_enabled: bool = True
+    cache_directory: Path | None = None
+    cache_max_bytes: int = 64 * 1024 * 1024
+    cache_ttl_seconds: float = 86400
+    jpeg_cache_max_bytes: int = 32 * 1024 * 1024
 
     def __post_init__(self):
-        if not all(isinstance(v, str) and v.strip() for v in
-                   (self.database_url, self.token, self.secret_key)):
+        if not all(
+            isinstance(v, str) and v.strip()
+            for v in (self.database_url, self.token, self.secret_key)
+        ):
             raise ValueError("服务数据库、Token 和加密密钥必须显式提供")
         object.__setattr__(self, "data_dir", Path(self.data_dir))
-        for name in ("worker_concurrency", "queue_capacity", "port",
-                     "max_upload_bytes", "max_image_pixels"):
+        for name in (
+            "worker_concurrency",
+            "queue_capacity",
+            "port",
+            "max_upload_bytes",
+            "max_image_pixels",
+            "cache_max_bytes",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} 必须为正整数")
+        if not isinstance(self.cache_enabled, bool):
+            raise ValueError("cache_enabled 必须为布尔值")
+        if not isinstance(self.enable_thinking, bool):
+            raise ValueError("enable_thinking 必须为布尔值")
+        if (
+            isinstance(self.jpeg_cache_max_bytes, bool)
+            or not isinstance(self.jpeg_cache_max_bytes, int)
+            or self.jpeg_cache_max_bytes < 0
+        ):
+            raise ValueError("jpeg_cache_max_bytes 必须为非负整数")
+        if (
+            isinstance(self.cache_ttl_seconds, bool)
+            or not isinstance(self.cache_ttl_seconds, (int, float))
+            or not math.isfinite(self.cache_ttl_seconds)
+            or self.cache_ttl_seconds <= 0
+        ):
+            raise ValueError("cache_ttl_seconds 必须为有限正数")
+        if self.cache_directory is not None:
+            if (
+                not isinstance(self.cache_directory, (str, Path))
+                or not str(self.cache_directory).strip()
+            ):
+                raise ValueError("cache_directory 必须为非空路径或 null")
+            object.__setattr__(self, "cache_directory", Path(self.cache_directory))
         if self.port > 65535:
             raise ValueError("port 必须在 1–65535 范围内")
-        if self.root_path and (not self.root_path.startswith("/") or
-                               self.root_path.endswith("/") or
-                               any(v in self.root_path for v in ("?", "#", "\\")) or
-                               ".." in self.root_path.split("/")):
+        if self.root_path and (
+            not self.root_path.startswith("/")
+            or self.root_path.endswith("/")
+            or any(v in self.root_path for v in ("?", "#", "\\"))
+            or ".." in self.root_path.split("/")
+        ):
             raise ValueError("root_path 必须为不带末尾斜杠的绝对路径前缀")
 
     @classmethod
@@ -60,8 +113,9 @@ class ServerSettings:
         """Load only the selected JSON; relative storage belongs to its directory."""
         try:
             source = Path(path).resolve()
-            values = json.loads(source.read_text(encoding="utf-8-sig"),
-                                object_pairs_hook=_unique_object)
+            values = json.loads(
+                source.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_object
+            )
         except (OSError, UnicodeError, ValueError):
             raise ValueError(
                 "无法读取服务配置 JSON；请复制 server.config.example.json 为 server.config.json，"
@@ -79,7 +133,11 @@ class ServerSettings:
             if "host" in values and not values["host"].strip():
                 raise ValueError
             parsed = urlsplit(values["database_url"])
-            if parsed.scheme != "mysql+asyncmy" or not parsed.hostname or not parsed.path.strip("/"):
+            if (
+                parsed.scheme != "mysql+asyncmy"
+                or not parsed.hostname
+                or not parsed.path.strip("/")
+            ):
                 raise ValueError
             # Reject malformed ports and keys before opening any external resource.
             if parsed.port is not None and not 1 <= parsed.port <= 65535:
@@ -88,6 +146,11 @@ class ServerSettings:
 
             Fernet(values["secret_key"].encode())
             values["data_dir"] = (source.parent / values["data_dir"]).resolve()
+            if values.get("cache_directory") is not None:
+                directory = values["cache_directory"]
+                if not isinstance(directory, str) or not directory.strip():
+                    raise ValueError
+                values["cache_directory"] = (source.parent / directory).resolve()
             return cls(**values)
         except (TypeError, ValueError, OSError):
             raise ValueError(
@@ -110,7 +173,13 @@ class ServerSettings:
         if not valid:
             raise ValueError("IMAGE_AGENT_SERVER_DATABASE_URL 必须是 mysql+asyncmy 的 MySQL 地址")
         values = {name.lower(): os.environ[prefix + name] for name in required}
-        for name in ("WORKER_CONCURRENCY", "QUEUE_CAPACITY", "PORT", "MAX_UPLOAD_BYTES", "MAX_IMAGE_PIXELS"):
+        for name in (
+            "WORKER_CONCURRENCY",
+            "QUEUE_CAPACITY",
+            "PORT",
+            "MAX_UPLOAD_BYTES",
+            "MAX_IMAGE_PIXELS",
+        ):
             if prefix + name in os.environ:
                 try:
                     values[name.lower()] = int(os.environ[prefix + name])
@@ -119,4 +188,9 @@ class ServerSettings:
         for name in ("ROOT_PATH", "HOST"):
             if prefix + name in os.environ:
                 values[name.lower()] = os.environ[prefix + name]
+        if prefix + "ENABLE_THINKING" in os.environ:
+            value = os.environ[prefix + "ENABLE_THINKING"].strip().lower()
+            if value not in {"true", "false"}:
+                raise ValueError(prefix + "ENABLE_THINKING 必须为 true 或 false")
+            values["enable_thinking"] = value == "true"
         return cls(**values)

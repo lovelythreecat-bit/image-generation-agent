@@ -17,7 +17,7 @@ async def test_saved_candidate_audit_resume_never_generates(request_data, tmp_pa
         request, AgentConfig(), dependencies=deps, policy=ExecutionPolicy(max_audit_retries=0)
     )
     asset = result.assets[0]
-    assert asset.status == 'succeeded' and asset.delivery.score is None
+    assert asset.status == "succeeded" and asset.delivery.score is None
     assert asset.candidates[0]["status"] == "audit_error"
     assert len(gen.calls) == 1
     assert (tmp_path / result.run_dir).is_dir()
@@ -26,7 +26,7 @@ async def test_saved_candidate_audit_resume_never_generates(request_data, tmp_pa
     assert resumed.status == "succeeded"
     assert len(gen.calls) == 1
     assert len(resumed.assets[0].candidates) == 1
-    assert 'delivered' in resumed.assets[0].file_path
+    assert "delivered" in resumed.assets[0].file_path
     assert (tmp_path / result.run_dir / "checkpoints.sqlite").exists()
 
 
@@ -187,9 +187,9 @@ async def test_success_promotes_candidate_away_from_failed_directory(request_dat
     asset = result.assets[0]
     assert len(asset.candidates) == 2
     assert asset.candidates[0]["file_path"].startswith("candidates/")
-    assert asset.candidates[1]['file_path'].startswith('candidates/')
-    assert 'approved/' in asset.file_path.replace('\\', '/')
-    assert len(list(Path(result.run_dir).glob('candidates/*/*.png'))) == 2
+    assert asset.candidates[1]["file_path"].startswith("candidates/")
+    assert "approved/" in asset.file_path.replace("\\", "/")
+    assert len(list(Path(result.run_dir).glob("candidates/*/*.png"))) == 2
 
 
 async def test_accept_older_candidate_survives_resume_with_exact_image(request_data, tmp_path):
@@ -211,11 +211,12 @@ async def test_accept_older_candidate_survives_resume_with_exact_image(request_d
     asset = result.assets[0]
     # Historical unapproved runs remain eligible for explicit manual acceptance.
     from image_agent.run_store import RunStore
+
     store = RunStore(result.run_dir)
-    state = store.json('state.json')
-    state['result']['status'] = state['result']['assets'][0]['status'] = 'quality_failed'
-    state['result']['assets'][0]['delivery'] = None
-    store.json('state.json', state)
+    state = store.json("state.json")
+    state["result"]["status"] = state["result"]["assets"][0]["status"] = "quality_failed"
+    state["result"]["assets"][0]["delivery"] = None
+    store.json("state.json", state)
     accepted = await accept_candidate(
         result.run_dir, asset.asset_id, "c0001", reason="Reviewed first candidate"
     )

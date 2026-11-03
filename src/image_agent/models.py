@@ -813,10 +813,10 @@ class GenerationAttempt(Model):
 
 
 class BestAvailableDelivery(Model):
-    mode: Literal['best_available', 'direct'] = 'best_available'
+    mode: Literal["best_available", "direct"] = "best_available"
     candidate_id: str = Field(min_length=1)
     score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
-    sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     stop_reason: str
 
 

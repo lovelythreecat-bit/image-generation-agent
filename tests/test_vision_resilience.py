@@ -42,14 +42,14 @@ async def test_discovery_root_validation_feedback_names_the_broken_reference(req
     from tests.test_vision import materials
 
     bad = analysis_data()
-    bad["subjects"][0]["identity_fact_ids"] = ["missing-fact"]
+    bad["subjects"][0]["material_ids"] = ["missing-material"]
     transport = RawTransport([{"content": bad}, {"content": analysis_data()}])
     result = await VisionClient(transport, AgentConfig()).analyze_materials(
         CreationRequest(**request_data), materials()
     )
     assert result.status == "ready"
     feedback = transport.calls[1][1]["messages"][0]["content"][0]["text"]
-    assert "unknown fact reference" in feedback
+    assert "unknown material reference" in feedback
     assert "value_error" in feedback
     assert len(transport.calls) == 2
 
@@ -174,7 +174,7 @@ async def test_focused_identity_ids_are_corrected_with_original_images(request_d
 
 
 @pytest.mark.parametrize("missing", ["verifiability", "source_type", "unknown"])
-async def test_fresh_discovery_corrects_missing_semantic_provenance(request_data, missing):
+async def test_optional_provenance_keeps_defaults_without_paid_correction(request_data, missing):
     from copy import deepcopy
 
     from image_agent.models import CreationRequest
@@ -196,8 +196,10 @@ async def test_fresh_discovery_corrects_missing_semantic_provenance(request_data
         CreationRequest(**request_data), materials()
     )
     assert result.facts[0].verifiability == "visible_appearance"
-    assert result.facts[0].evidence[0].source_type == "visual"
-    assert len(transport.calls) == 2
+    assert result.facts[0].evidence[0].source_type == (
+        "visual" if missing == "verifiability" else "unknown"
+    )
+    assert len(transport.calls) == 1
     assert "physical label" in transport.calls[0][1]["messages"][0]["content"][0]["text"]
 
 

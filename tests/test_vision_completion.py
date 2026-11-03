@@ -285,7 +285,7 @@ async def test_needs_input_planning_gap_freezes_discovered_product_during_repair
 
 
 @pytest.mark.parametrize("issue_kind", ["ambiguous_subject", "missing_evidence", "missing_scene"])
-async def test_fresh_identity_blocker_is_not_forced_ready_to_fill_missing_plan(
+async def test_selection_blockers_remain_but_optional_evidence_allows_planning(
     request_data, issue_kind
 ):
     original = analysis_data() | {"status": "needs_input", "creative_plan": None}
@@ -299,14 +299,22 @@ async def test_fresh_identity_blocker_is_not_forced_ready_to_fill_missing_plan(
             fact_ids=[] if issue_kind == "ambiguous_subject" else ["f1"],
         )
     ]
-    transport = ScriptTransport([original, complete_discovery()])
+    completed = deepcopy(original) | {
+        "status": "ready",
+        "creative_plan": complete_discovery()["creative_plan"],
+    }
+    transport = ScriptTransport([original, completed])
     result = await VisionClient(transport, AgentConfig()).analyze_materials(
         CreationRequest(**request_data), materials()
     )
-    assert result.status == "needs_input" and result.creative_plan is None
+    if issue_kind == "missing_evidence":
+        assert result.status == "ready" and result.creative_plan is not None
+        assert len(transport.calls) == 2
+    else:
+        assert result.status == "needs_input" and result.creative_plan is None
+        assert len(transport.calls) == 1
     assert result.issues[0].issue_id == "identity"
     assert result.facts[0].description == "white ceramic cup"
-    assert len(transport.calls) == 1
 
 
 async def test_locked_planning_snapshot_preserves_legacy_fingerprint_during_repair(request_data):
@@ -376,12 +384,13 @@ async def test_legacy_snapshot_completes_creative_plan_without_rewriting_provena
     assert len(transport.calls) == 2
 
 
-async def test_fresh_unknown_provenance_still_exhausts_without_becoming_valid(request_data):
+async def test_fresh_unknown_provenance_is_preserved_without_extra_calls(request_data):
     invalid = complete_discovery()
     invalid["facts"][0]["evidence"][0]["source_type"] = "unknown"
     transport = ScriptTransport([invalid] * 5)
-    with pytest.raises(ProviderError, match="source_type required"):
-        await VisionClient(transport, AgentConfig()).analyze_materials(
-            CreationRequest(**request_data), materials()
-        )
-    assert len(transport.calls) == 4
+    result = await VisionClient(transport, AgentConfig()).analyze_materials(
+        CreationRequest(**request_data), materials()
+    )
+    assert result.status == "ready"
+    assert result.facts[0].evidence[0].source_type == "unknown"
+    assert len(transport.calls) == 1

@@ -1,11 +1,15 @@
+import asyncio
 import base64
 import binascii
+import time
 from urllib.parse import urlsplit
 
+from .cache import cached_jpeg
 from .errors import ProviderError
+from .execution import record_image_attempt
 from .image_protocols import generate_image, image_endpoint
 from .images import generated_image
-from .transport import compute, model_permit
+from .transport import compute, model_permit, single_image_post
 
 
 def _image_value_diagnostic(value):
@@ -127,40 +131,61 @@ class ImageGenerator:
         async with model_permit(permit, self.config.model_concurrency):
             images, notes = [], []
             for i, ref in enumerate(references, 1):
-                image = await compute(self.encoder, ref.data, 1024)
+                image = await compute(
+                    cached_jpeg,
+                    self.encoder,
+                    ref.data,
+                    1024,
+                    self.config.jpeg_cache_max_bytes if self.config.cache_enabled else 0,
+                )
                 images.append(image)
                 notes.append(
                     f"Reference Image {i}: {ref.material_id or ref.stage_id}; purpose={ref.role}; elements={','.join(ref.element_ids)}. Use only the assigned facts and purpose; scene/style images never replace product identity."
                 )
-            response = await generate_image(
-                transport,
-                service,
-                model=model,
-                prompt="\n\n".join([*notes, prompt]),
-                size=size,
-                aspect_ratio=aspect_ratio,
-                images=images,
-            )
-            try:
-                source = _extract_image_source(response, allow_remote=True)
-                if isinstance(source, bytes):
-                    return source
-                data = await self.transport.download_image(source)
-                await compute(generated_image, data)
+            # One owner for the POST limit: transport retries must not multiply it.
+            for attempt in range(1, 4):
+                started = time.monotonic()
+                try:
+                    with single_image_post():
+                        response = await generate_image(
+                            transport,
+                            service,
+                            model=model,
+                            prompt="\n\n".join([*notes, prompt]),
+                            size=size,
+                            aspect_ratio=aspect_ratio,
+                            images=images,
+                        )
+                    source = _extract_image_source(response, allow_remote=True)
+                    data = (
+                        source
+                        if isinstance(source, bytes)
+                        else (await self.transport.download_image(source))
+                    )
+                    await compute(generated_image, data)
+                except ProviderError as error:
+                    record_image_attempt(attempt, time.monotonic() - started, error)
+                    if error.kind not in {"http", "transport", "protocol"}:
+                        raise
+                    if attempt < 3:
+                        await getattr(self.transport, "sleep", asyncio.sleep)(
+                            (2.0, 4.0)[attempt - 1]
+                        )
+                        continue
+                    base_url = service.base_url if service else self.config.openrouter_base_url
+                    address = urlsplit(base_url)
+                    endpoint, body_format = image_endpoint(service, bool(images))
+                    path = (address.path.rstrip("/") + endpoint).strip("/").replace("/", " > ")
+                    protocol = service.protocol if service else "openrouter_images"
+                    context = (
+                        f"POST {address.hostname}; {path}; {body_format}; "
+                        f"protocol={protocol}; model={model}; refs={len(images)}"
+                    )
+                    raise ProviderError(
+                        f"Image generation failed after 3 attempts: {error.message}\n请求：{context}",
+                        code="generation_attempts_exhausted",
+                        kind=error.kind,
+                        status_code=error.status_code,
+                    ) from None
+                record_image_attempt(attempt, time.monotonic() - started)
                 return data
-            except ProviderError as error:
-                base_url = service.base_url if service else self.config.openrouter_base_url
-                address = urlsplit(base_url)
-                endpoint, body_format = image_endpoint(service, bool(images))
-                path = (address.path.rstrip("/") + endpoint).strip("/").replace("/", " > ")
-                protocol = service.protocol if service else "openrouter_images"
-                context = (
-                    f"POST {address.hostname}; {path}; {body_format}; "
-                    f"protocol={protocol}; model={model}; refs={len(images)}"
-                )
-                raise ProviderError(
-                    f"{error.message}\n请求：{context}",
-                    code=error.code,
-                    kind=error.kind,
-                    status_code=error.status_code,
-                ) from None

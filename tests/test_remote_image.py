@@ -11,8 +11,11 @@ from tests.test_images import picture
 
 
 async def generate_with(client, *, sleep=None):
+    async def no_sleep(_):
+        pass
+
     config = AgentConfig(openrouter_api_key="api-secret")
-    transport = HttpTransport(config, client=client, **({"sleep": sleep} if sleep else {}))
+    transport = HttpTransport(config, client=client, sleep=sleep or no_sleep)
     return await ImageGenerator(transport, config, encoder=lambda data, limit: data).generate(
         prompt="cup", model="gpt-image-2", size="1K", aspect_ratio="1:1", references=()
     )
@@ -51,7 +54,11 @@ async def test_url_image_with_empty_base64_is_downloaded_without_api_credentials
     assert [r.method for r in calls] == ["POST", "GET"]
 
 
-@pytest.mark.parametrize("inline, succeeds", [("aW1hZ2U=", True), ("%%%", False)])
+@pytest.mark.parametrize(
+    "inline, succeeds",
+    [(base64.b64encode(picture((32, 32))).decode(), True), ("%%%", False)],
+    ids=["valid-image", "invalid-base64"],
+)
 async def test_nonempty_inline_image_keeps_precedence_over_remote_url(inline, succeeds):
     calls = []
 
@@ -67,7 +74,8 @@ async def test_nonempty_inline_image_keeps_precedence_over_remote_url(inline, su
         else:
             with pytest.raises(ProviderError, match="invalid image base64"):
                 await generate_with(client)
-    assert len(calls) == 1
+    assert len(calls) == (1 if succeeds else 3)
+    assert all(call.method == "POST" for call in calls)
 
 
 async def test_image_redirect_and_download_retry_never_repeat_generation_or_send_auth():
@@ -124,7 +132,9 @@ async def test_invalid_image_url_fails_without_a_download(url):
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ProviderError) as error:
             await generate_with(client)
-    assert len(calls) == 1
+    assert len(calls) == 3
+    assert all(call.method == "POST" for call in calls)
+    assert error.value.code == "generation_attempts_exhausted"
     assert "password" not in str(error.value)
 
 
@@ -145,7 +155,8 @@ async def test_download_failure_is_explicit_without_leaking_signed_url(status, c
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ProviderError) as error:
             await generate_with(client)
-    assert len(calls) == 2
+    assert [call.method for call in calls] == ["POST", "GET"] * 3
+    assert error.value.code == "generation_attempts_exhausted"
     assert "private-value" not in str(error.value) and "private error" not in str(error.value)
     if status == 404:
         assert error.value.status_code == 404
@@ -199,5 +210,6 @@ async def test_download_checks_redirect_targets_and_bounds_redirect_loops(locati
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ProviderError):
             await generate_with(client)
-    assert sum(r.method == "GET" for r in calls) == get_count
+    assert sum(r.method == "POST" for r in calls) == 3
+    assert sum(r.method == "GET" for r in calls) == get_count * 3
     assert all(r.url.host != "127.0.0.1" for r in calls)

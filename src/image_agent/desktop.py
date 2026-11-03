@@ -952,8 +952,11 @@ class DesktopApp:
         if controls and self.outputs["long_image"].get():
             long_text = (
                 controls.known_info.get("1.0", "end-1c"),
-                tuple(line for line in controls.copy_text.get("1.0", "end-1c").split("\n")
-                      if line.strip()),
+                tuple(
+                    line
+                    for line in controls.copy_text.get("1.0", "end-1c").split("\n")
+                    if line.strip()
+                ),
             )
         return (
             tuple(self.materials),
@@ -1342,7 +1345,8 @@ class DesktopApp:
             f"成功 {sum(a.status == 'succeeded' for a in result.assets)}/{len(result.assets)} 张"
             + (
                 " · " + format_user_error(result.output_errors[0], stage="output").text
-                if result.output_errors else ""
+                if result.output_errors
+                else ""
             )
             + (
                 f" · 候选图 {sum(a.status not in ('succeeded', 'accepted') and a.image is not None for a in result.assets)} 张（未通过审核）"
@@ -1465,7 +1469,9 @@ class DesktopApp:
             if asset.status not in ("succeeded", "accepted"):
                 notice.append(format_user_error(asset).text)
             # Composed long images retain the precise per-section errors in metadata.
-            metadata = (self.candidate_options[-1].get("metadata") or {}) if self.candidate_options else {}
+            metadata = (
+                (self.candidate_options[-1].get("metadata") or {}) if self.candidate_options else {}
+            )
             for i, segment in enumerate(metadata.get("segments", []), 1):
                 if segment.get("status") not in ("succeeded", "accepted"):
                     notice.append(format_user_error(segment, stage=f"第 {i} 段审核").text)
@@ -1504,8 +1510,10 @@ class DesktopApp:
                     else "\n候选历史；自动交付以资产审核状态为准"
                 )
                 + (
-                    "\n" + format_user_error(candidate if candidate.get("error_info") else asset).text
-                    if asset.stop_reason or candidate.get("error_info") else ""
+                    "\n"
+                    + format_user_error(candidate if candidate.get("error_info") else asset).text
+                    if asset.stop_reason or candidate.get("error_info")
+                    else ""
                 )
                 + (
                     f"\n接受原因：{candidate['acceptance']['reason']}"

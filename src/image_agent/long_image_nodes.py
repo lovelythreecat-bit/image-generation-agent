@@ -88,6 +88,9 @@ class LongImageNodes:
                     )
                     asset.error_info = info
                     state["phase"] = "finish_slot"
+                    if info.code == "generation_attempts_exhausted":
+                        result.status, result.error_info = "failed", info
+                        state["phase"] = "finish"
                 else:
                     result.status = "needs_input" if info.code == "needs_input" else "failed"
                     result.error_info = info
@@ -257,6 +260,9 @@ class LongImageNodes:
                         references=prepared.references,
                     )
                 except AgentError as error:
+                    if error.code == "generation_attempts_exhausted":
+                        self.store.mark_operation(operation, "failed", error_code=error.code)
+                        raise
                     if error.code == "budget_exhausted" and not self.store.operation(operation).get(
                         "submissions"
                     ):

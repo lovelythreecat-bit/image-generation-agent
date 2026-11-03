@@ -297,7 +297,8 @@ class _ScrollablePreview:
                     self._preview_requested_key = None
                     if error is not None:
                         self.notice.configure(
-                            text=self.notice.cget("text") + " · "
+                            text=self.notice.cget("text")
+                            + " · "
                             + self.app.safe_text(format_user_error(error, stage="preview").text)
                         )
                         self._clear_preview()
@@ -310,7 +311,8 @@ class _ScrollablePreview:
                         self._draw_visible_preview()
             except Exception as error:
                 self.notice.configure(
-                    text=self.notice.cget("text") + " · "
+                    text=self.notice.cget("text")
+                    + " · "
                     + self.app.safe_text(format_user_error(error, stage="preview").text)
                 )
                 self._clear_preview()
@@ -481,7 +483,8 @@ class ProductLongImagePreview(_ScrollablePreview):
             self._draw_visible_preview()
         except Exception as error:
             self.notice.configure(
-                text=self.notice.cget("text") + " · "
+                text=self.notice.cget("text")
+                + " · "
                 + self.app.safe_text(format_user_error(error, stage="preview").text)
             )
             self.source_data = None
@@ -1081,7 +1084,8 @@ class LongImagePanel(_ScrollablePreview):
         self.app.notebook.select(self.planning_tab)
         self.field_error.set("；".join(i.message for i in result.issues))
         self.app.status.set(
-            format_user_error(result, stage="plan").text if result.error_info
+            format_user_error(result, stage="plan").text
+            if result.error_info
             else f"规划完成 · {self._status(result.status)}"
         )
         self.update_actions()
@@ -1293,7 +1297,8 @@ class LongImagePanel(_ScrollablePreview):
             self._draw_visible_preview()
         except Exception as error:
             self.notice.configure(
-                text=self.notice.cget("text") + " · "
+                text=self.notice.cget("text")
+                + " · "
                 + self.app.safe_text(format_user_error(error, stage="preview").text)
             )
             self._clear_preview()

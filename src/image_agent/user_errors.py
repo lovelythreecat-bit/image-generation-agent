@@ -9,16 +9,32 @@ from .errors import make_error_info
 from .sanitization import redact
 
 STAGES = {
-    "analyze": "素材分析", "analyze_materials": "素材分析", "prepare": "素材准备",
-    "plan_product_long_image": "长图策划", "plan_long_image": "长图策划",
-    "long_plan": "长图策划", "plan": "长图策划", "generate": "生图",
-    "long_generate": "长图生图", "create": "生成任务", "resume": "恢复任务",
-    "audit_image": "图片审核", "audit": "图片审核", "long_audit": "长图审核",
-    "audit_product_long_image_copy": "长图文字审核", "review_product": "商品外观审核",
-    "long_compose": "长图拼接", "compose": "长图拼接", "render": "长图排版",
-    "save_candidate": "图片保存", "long_save_candidate": "长图保存",
-    "output": "结果保存", "preview": "图片预览", "load": "加载任务",
-    "group_audit": "成组审核", "repair": "图片修复",
+    "analyze": "素材分析",
+    "analyze_materials": "素材分析",
+    "prepare": "素材准备",
+    "plan_product_long_image": "长图策划",
+    "plan_long_image": "长图策划",
+    "long_plan": "长图策划",
+    "plan": "长图策划",
+    "generate": "生图",
+    "long_generate": "长图生图",
+    "create": "生成任务",
+    "resume": "恢复任务",
+    "audit_image": "图片审核",
+    "audit": "图片审核",
+    "long_audit": "长图审核",
+    "audit_product_long_image_copy": "长图文字审核",
+    "review_product": "商品外观审核",
+    "long_compose": "长图拼接",
+    "compose": "长图拼接",
+    "render": "长图排版",
+    "save_candidate": "图片保存",
+    "long_save_candidate": "长图保存",
+    "output": "结果保存",
+    "preview": "图片预览",
+    "load": "加载任务",
+    "group_audit": "成组审核",
+    "repair": "图片修复",
 }
 
 
@@ -73,14 +89,17 @@ def format_user_error(error, *, stage=None):
     # The deepest recorded stage is more precise than the desktop operation name.
     embedded_stage = next((name for name in STAGES if name in lower), None)
     label = (
-        stage if stage and re.search(r"[\u4e00-\u9fff]", stage)
+        stage
+        if stage and re.search(r"[\u4e00-\u9fff]", stage)
         else STAGES.get(_get(info, "stage") or embedded_stage or stage, None)
     )
     if not label:
         label = stage if stage and re.search(r"[\u4e00-\u9fff]", stage) else None
     if not label:
-        label = "图片审核" if status in {"audit_error", "pending_audit", "quality_failed"} else (
-            "结果保存" if kind == "output" else "生图" if _get(error, "asset_id") else "操作"
+        label = (
+            "图片审核"
+            if status in {"audit_error", "pending_audit", "quality_failed"}
+            else ("结果保存" if kind == "output" else "生图" if _get(error, "asset_id") else "操作")
         )
     reason, action = "服务未返回具体原因", "输入与已有记录已保留，请查看技术详情定位问题。"
     if code == "generation_uncertain":
@@ -122,19 +141,27 @@ def format_user_error(error, *, stage=None):
     elif code in ("provider_refusal", "vision_refusal"):
         reason = "模型服务拒绝处理本次请求"
         action = "请查看服务返回的技术详情，确认模型是否支持本次输入。"
-    elif kind == "protocol" or any(word in lower for word in (
-        "invalid json", "missing", "source_quote", "schema", "malformed"
-    )):
+    elif kind == "protocol" or any(
+        word in lower for word in ("invalid json", "missing", "source_quote", "schema", "malformed")
+    ):
         reason = "模型返回格式无法解析或缺少必要内容"
         action = "这是系统与模型返回的问题，无需补内部编号或来源字段；请保留记录排查。"
-    elif kind in ("quality", "compliance") or status in ("quality_failed", "audit_error", "pending_audit"):
+    elif kind in ("quality", "compliance") or status in (
+        "quality_failed",
+        "audit_error",
+        "pending_audit",
+    ):
         quality = _get(error, "quality") or {}
         copy_audit = _get(error, "copy_audit") or {}
         issues = [_chinese_reason(redact(i)) for i in _get(copy_audit, "issues", [])]
-        reason = "；".join(i for i in issues if i) or _chinese_reason(
-            _get(quality, "reason", "") or message
-        ) or (
-            "审核尚未完成" if status == "pending_audit" else "商品外观或指定文字未通过审核，未返回具体差异"
+        reason = (
+            "；".join(i for i in issues if i)
+            or _chinese_reason(_get(quality, "reason", "") or message)
+            or (
+                "审核尚未完成"
+                if status == "pending_audit"
+                else "商品外观或指定文字未通过审核，未返回具体差异"
+            )
         )
         action = "请核对已保存的候选图片与原图、指定文案；技术详情保留审核记录。"
     elif kind == "validation":
@@ -142,8 +169,7 @@ def format_user_error(error, *, stage=None):
         action = "请检查表单参数；若是模型返回或历史任务数据问题，请保留记录排查。"
     elif stage == "preview":
         reason = _chinese_reason(message) or (
-            "图片数据不完整或已损坏" if "truncated" in lower
-            else "图片无法读取或预览解码失败"
+            "图片数据不完整或已损坏" if "truncated" in lower else "图片无法读取或预览解码失败"
         )
         action = "请检查已保存图片是否完整；生成记录仍保留在任务中。"
     elif message:

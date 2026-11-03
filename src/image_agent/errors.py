@@ -62,7 +62,7 @@ def make_error_info(error, *, stage=None):
         message=redact(error.message),
         status_code=error.status_code,
         stage=stage,
-        retryable=error.code != "generation_uncertain"
+        retryable=error.code not in {"generation_uncertain", "generation_attempts_exhausted"}
         and (
             error.kind == "transport"
             or (error.kind == "http" and error.status_code in (429, 502, 503, 504))

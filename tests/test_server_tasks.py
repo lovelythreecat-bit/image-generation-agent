@@ -37,6 +37,7 @@ async def service(tmp_path):
     from image_agent.server.db_models import Base
     from image_agent.server.media import MediaStore
     from image_agent.server.secrets import SecretCipher
+    from image_agent.server.settings import ServerSettings
 
     try:
         from image_agent.server.task_service import TaskService
@@ -60,7 +61,16 @@ async def service(tmp_path):
         ConfigService(),
         media,
         SecretCipher(Fernet.generate_key().decode()),
-        SimpleNamespace(queue_capacity=100),
+        SimpleNamespace(
+            **vars(
+                ServerSettings(
+                    database_url=str(engine.url),
+                    token="test-token",
+                    secret_key=Fernet.generate_key().decode(),
+                    data_dir=tmp_path / "data",
+                )
+            )
+        ),
     )
     yield result
     await engine.dispose()

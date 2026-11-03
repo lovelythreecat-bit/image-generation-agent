@@ -33,7 +33,9 @@ async def test_optional_focus_allows_generation(request_data, output_type, count
         CreationRequest(**(request_data | {"output_types": [output_type]})),
         config,
         dependencies=Dependencies(
-            vision=VisionClient(transport, config), generator=generator, load=load,
+            vision=VisionClient(transport, config),
+            generator=generator,
+            load=load,
         ),
     )
     assert result.status == "succeeded", result.error_info

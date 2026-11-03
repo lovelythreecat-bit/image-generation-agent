@@ -23,7 +23,11 @@ def test_long_output_defaults_and_mixed_targets(request_data):
         )
     )
     targets = build_targets(mixed, "product_only")
-    assert len(targets) == 11
+    assert len(targets) == 12
+    assert [t.platform for t in targets if t.output_type == "pdd_white_background"] == [
+        "taobao",
+        "pinduoduo",
+    ]
     assert [t.aspect_ratio for t in targets if t.output_type == "long_image"] == ["3:4", "3:4"]
 
 

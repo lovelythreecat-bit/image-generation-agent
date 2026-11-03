@@ -25,8 +25,11 @@ def test_request_maps_materials_and_rejects_invalid_combinations(tmp_path):
         build_request([], **fields)
     with pytest.raises(ValidationError):
         build_request([tmp_path / "a.png"] * 9, **fields)
-    with pytest.raises(ValidationError):
-        build_request([tmp_path / "a.png"], **{**fields, "output_types": ["pdd_white_background"]})
+    white_background = build_request(
+        [tmp_path / "a.png"], **{**fields, "output_types": ["pdd_white_background"]}
+    )
+    assert white_background.platforms == ["taobao"]
+    assert white_background.output_types == ["pdd_white_background"]
 
 
 def test_credentials_are_per_service_without_mutating_config_or_environment():

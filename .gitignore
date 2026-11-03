@@ -29,4 +29,7 @@ examples/密钥.md
 
 # Local HTTP deployment credentials and image/task storage
 /server.config.json
+/server.config.*.json
+!/server.config.example.json
 /server-data/
+/agent.md

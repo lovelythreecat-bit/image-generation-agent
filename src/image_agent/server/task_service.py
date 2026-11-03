@@ -29,7 +29,7 @@ from image_agent.models import (
 )
 
 from .db_models import HttpMedia, HttpTask
-from .settings import ServerError
+from .settings import DEPLOYMENT_FIELDS, ServerError
 from .task_repository import TaskRepository
 
 
@@ -108,7 +108,7 @@ class AcceptRequest(Model):
 
 
 def config_mapping(config):
-    mapping = config.model_dump(mode="json", exclude=LEGACY_FIELDS)
+    mapping = config.model_dump(mode="json", exclude=LEGACY_FIELDS | DEPLOYMENT_FIELDS)
     active = config.credential_services()
     for name, service in config.services.items():
         mapping["services"][name]["api_key"] = service.credential() if name in active else None
@@ -448,7 +448,7 @@ def sanitize_public_model(
                 return list(item)
             return [walk(data, shape.get("items", {}), field) for data in item]
         if isinstance(item, str):
-            if field in {'sha256', 'fingerprint'} and item in trusted_hashes:
+            if field in {"sha256", "fingerprint"} and item in trusted_hashes:
                 return item
             if "pattern" in shape:
                 # Format and reference validation do not establish source trust.
@@ -669,9 +669,13 @@ class TaskService:
         from image_agent import pipeline
 
         try:
-            config = AgentConfig.from_mapping(
-                self.cipher.decrypt_mapping(task.config_snapshot_encrypted)
-            )
+            mapping = self.cipher.decrypt_mapping(task.config_snapshot_encrypted)
+            # Current deployment policy also applies to queued and resumed tasks;
+            # all model routes and other task settings retain their snapshot values.
+            mapping.update({name: getattr(self.settings, name) for name in DEPLOYMENT_FIELDS})
+            directory = self.settings.cache_directory
+            mapping["cache_directory"] = str(directory) if directory is not None else None
+            config = AgentConfig.from_mapping(mapping)
             secrets = [service.credential() for service in config.credential_services().values()]
             dto = CreationRequestDTO.model_validate(task.normalized_request["request"])
             client_material_ids = {material.material_id for material in dto.materials}

@@ -5,6 +5,7 @@ import inspect
 
 from pydantic import ValidationError
 
+from .cache import cache_diagnostic_scope
 from .compliance import apply_compliance
 from .delivery import delivery_warning, select_best_available
 from .errors import AgentError, ProviderError, make_error_info
@@ -60,6 +61,17 @@ STAGES = (
 def aggregate(result):
     if not result.assets:
         return
+    exhausted = next(
+        (
+            a.error_info
+            for a in result.assets
+            if a.error_info and a.error_info.code == "generation_attempts_exhausted"
+        ),
+        None,
+    )
+    if exhausted is not None:
+        result.status, result.error_info = "failed", exhausted
+        return
     statuses = [asset.status for asset in result.assets]
     if all(s == "succeeded" for s in statuses):
         result.status = "succeeded"
@@ -111,23 +123,28 @@ class GraphNodes:
         try:
             await self.long_workflow.generate(state)
         except AgentError as error:
-            self.fallback_long_section(state, error, 'long_generate')
+            self.fallback_long_section(state, error, "long_generate")
 
     def fallback_long_section(self, state, error, stage):
         _, segment = self.long_workflow.current(state)
-        if not segment['candidates']:
+        if not segment["candidates"]:
             raise error
         info = make_error_info(error, stage=stage)
-        segment.update(status='generation_uncertain' if info.code == 'generation_uncertain'
-                       else 'budget_exhausted' if info.code == 'budget_exhausted'
-                       else 'audit_error', error_info=info.model_dump(mode='json'))
+        segment.update(
+            status="generation_uncertain"
+            if info.code == "generation_uncertain"
+            else "budget_exhausted"
+            if info.code == "budget_exhausted"
+            else "audit_error",
+            error_info=info.model_dump(mode="json"),
+        )
         self.long_workflow.advance(state)
 
     async def long_save_candidate(self, state):
         try:
             await self.long_workflow.save_candidate(state)
         except AgentError as error:
-            self.fallback_long_section(state, error, 'long_save_candidate')
+            self.fallback_long_section(state, error, "long_save_candidate")
 
     async def long_audit(self, state):
         await self.long_workflow.audit(state)
@@ -138,7 +155,9 @@ class GraphNodes:
         try:
             await self.long_workflow.compose(state)
         except OSError:
-            raise OutputError("product long-image composition/write failed; saved sections retained") from None
+            raise OutputError(
+                "product long-image composition/write failed; saved sections retained"
+            ) from None
 
     def context(self, state):
         data = dict(state["context"])
@@ -182,7 +201,7 @@ class GraphNodes:
             state = copy.deepcopy(graph_state["data"])
             await self.emit(stage, state)
             try:
-                with call_scope(self.ledger, "vision"):
+                with cache_diagnostic_scope(self.store), call_scope(self.ledger, "vision"):
                     await getattr(self, stage)(state)
             except (AgentError, ValidationError) as error:
                 if getattr(error, "code", None) == "stale_analysis":
@@ -206,7 +225,9 @@ class GraphNodes:
                     if asset.attempts:
                         asset.attempts[-1].error_info = info
                     self.update_asset(state, asset)
-                    state["phase"] = "finish_asset"
+                    state["phase"] = (
+                        "finish" if info.code == "generation_attempts_exhausted" else "finish_asset"
+                    )
             state["result"]["usage"] = self.ledger.usage()
             self.store.json("state.json", state)
             await self.persist_result(state)
@@ -458,7 +479,9 @@ class GraphNodes:
                 candidate.update(status="succeeded", selected=True)
                 asset.status = "succeeded"
                 asset.delivery = BestAvailableDelivery(
-                    mode="direct", candidate_id=candidate_id, sha256=ref["sha256"],
+                    mode="direct",
+                    candidate_id=candidate_id,
+                    sha256=ref["sha256"],
                     stop_reason="generation_completed",
                 )
                 state["phase"] = "finish_asset"
@@ -604,20 +627,22 @@ class GraphNodes:
 
     async def finish_asset(self, state):
         asset = self.asset(state)
-        if asset.status not in ('succeeded', 'accepted'):
+        if asset.status not in ("succeeded", "accepted"):
             selected = select_best_available(asset, self.target(state), self.candidate_bytes)
             if selected is not None:
-                state['result']['warnings'].append(delivery_warning(asset))
+                state["result"]["warnings"].append(delivery_warning(asset))
         if asset.status == "succeeded":
-            candidate = next((c for c in asset.candidates if c.get('selected')), None)
-            candidate = candidate or next(c for c in reversed(asset.candidates) if c['status'] == 'succeeded')
+            candidate = next((c for c in asset.candidates if c.get("selected")), None)
+            candidate = candidate or next(
+                c for c in reversed(asset.candidates) if c["status"] == "succeeded"
+            )
             data = self.candidate_bytes(candidate)
-            bucket = 'delivered' if asset.delivery else 'approved'
+            bucket = "delivered" if asset.delivery else "approved"
             ref = self.store.write(
                 f"{bucket}/{asset.platform}/{asset.output_type}/{asset.variant or 'default'}{image_format(data)[0]}",
                 data,
             )
-            asset.file_path = ref['path']
+            asset.file_path = ref["path"]
             candidate["selected"] = True
             target = self.target(state)
             if "detail_page" in self.request.output_types and (
@@ -668,7 +693,14 @@ class GraphNodes:
         runtime = state["product_long_images"][asset.asset_id]
         if runtime.get("resume_phase"):
             return runtime["resume_phase"]
-        pending = next((i for i, segment in enumerate(runtime["segments"]) if segment["status"] in ("pending_audit", "audit_error") and segment["candidates"]), None)
+        pending = next(
+            (
+                i
+                for i, segment in enumerate(runtime["segments"])
+                if segment["status"] in ("pending_audit", "audit_error") and segment["candidates"]
+            ),
+            None,
+        )
         if pending is not None:
             runtime["section_index"] = pending
             runtime["segments"][pending]["audit_attempts"] = 0
@@ -731,11 +763,7 @@ class GraphNodes:
                         audit_context,
                         tuple(a.element_plan for a in detail),
                         tuple(
-                            self.candidate_bytes(
-                                next(
-                                    c for c in a.candidates if c.get('selected')
-                                )
-                            )
+                            self.candidate_bytes(next(c for c in a.candidates if c.get("selected")))
                             for a in detail
                         ),
                     )

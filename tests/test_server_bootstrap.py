@@ -7,6 +7,7 @@ import pytest
 
 def test_required_environment_is_explicit_and_safe(monkeypatch):
     from image_agent.server.settings import ServerSettings
+
     for name in tuple(os.environ):
         if name.startswith("IMAGE_AGENT_SERVER_"):
             monkeypatch.delenv(name)
@@ -21,8 +22,13 @@ def test_settings_validate_mysql_and_hide_secrets(monkeypatch, tmp_path):
     from cryptography.fernet import Fernet
 
     from image_agent.server.settings import ServerSettings
-    values = {"DATABASE_URL": "mysql+asyncmy://u:db-secret@localhost/a", "TOKEN": "token-secret",
-              "SECRET_KEY": Fernet.generate_key().decode(), "DATA_DIR": str(tmp_path)}
+
+    values = {
+        "DATABASE_URL": "mysql+asyncmy://u:db-secret@localhost/a",
+        "TOKEN": "token-secret",
+        "SECRET_KEY": Fernet.generate_key().decode(),
+        "DATA_DIR": str(tmp_path),
+    }
     for k, v in values.items():
         monkeypatch.setenv("IMAGE_AGENT_SERVER_" + k, v)
     settings = ServerSettings.from_env()
@@ -46,8 +52,9 @@ import image_agent
 import image_agent.server
 assert callable(image_agent.create_images)
 """
-    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path,
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stderr
 
 
@@ -59,6 +66,7 @@ def test_token_and_safe_error_envelopes(tmp_path):
     from image_agent.server.app import create_app
     from image_agent.server.auth import require_token
     from image_agent.server.settings import ServerError, ServerSettings
+
     settings = ServerSettings("sqlite+aiosqlite://", "server-token", "unused", tmp_path)
     app = create_app(settings)
 
@@ -80,9 +88,17 @@ def test_token_and_safe_error_envelopes(tmp_path):
         assert response.status_code == 401
         assert response.headers["WWW-Authenticate"] == "Bearer"
         assert set(response.json()) == {"code", "message", "request_id"}
-    assert client.post("/probe", json={"value": 1}, headers={"Authorization": "Bearer server-token"}).status_code == 200
-    invalid = client.post("/probe", json={"value": "secret-validation-input"},
-                          headers={"Authorization": "Bearer server-token"})
+    assert (
+        client.post(
+            "/probe", json={"value": 1}, headers={"Authorization": "Bearer server-token"}
+        ).status_code
+        == 200
+    )
+    invalid = client.post(
+        "/probe",
+        json={"value": "secret-validation-input"},
+        headers={"Authorization": "Bearer server-token"},
+    )
     assert invalid.status_code == 422
     assert "secret-validation-input" not in invalid.text
     failed = client.get("/failure")
@@ -95,6 +111,7 @@ def test_readiness_never_reports_uninitialized_resources_ready(tmp_path):
 
     from image_agent.server.app import create_app
     from image_agent.server.settings import ServerSettings
+
     app = create_app(ServerSettings("sqlite+aiosqlite://", "server-token", "unused", tmp_path))
     client = TestClient(app)
     assert client.get("/health/live").json() == {"status": "ok"}
@@ -103,12 +120,12 @@ def test_readiness_never_reports_uninitialized_resources_ready(tmp_path):
     assert "sqlite" not in response.text and str(tmp_path) not in response.text
 
 
-
 def test_unexpected_failure_is_sanitized_without_propagating_to_server_logs(tmp_path):
     from fastapi.testclient import TestClient
 
     from image_agent.server.app import create_app
     from image_agent.server.settings import ServerSettings
+
     app = create_app(ServerSettings("sqlite+aiosqlite://", "server-token", "unused", tmp_path))
 
     @app.get("/unexpected")
@@ -128,10 +145,15 @@ def test_lifespan_database_outage_keeps_docs_public_and_never_falls_back(tmp_pat
 
     from image_agent.server.app import create_app
     from image_agent.server.settings import ServerSettings
+
     monkeypatch.setenv("IMAGE_AGENT_OPENROUTER_API_KEY", "legacy-private-key")
     # A read-only missing SQLite DB gives a real connection failure, with no provider call.
-    settings = ServerSettings("sqlite+aiosqlite:///file:does-not-exist?mode=ro&uri=true",
-                              "server-token", Fernet.generate_key().decode(), tmp_path)
+    settings = ServerSettings(
+        "sqlite+aiosqlite:///file:does-not-exist?mode=ro&uri=true",
+        "server-token",
+        Fernet.generate_key().decode(),
+        tmp_path,
+    )
     with TestClient(create_app(settings)) as client:
         assert client.get("/health/live").status_code == 200
         assert client.get("/health/ready").status_code == 503
@@ -139,7 +161,6 @@ def test_lifespan_database_outage_keeps_docs_public_and_never_falls_back(tmp_pat
         response = client.get("/api/v1/services", headers={"Authorization": "Bearer server-token"})
         assert response.status_code == 503
         assert "legacy-private-key" not in response.text
-
 
 
 @pytest.mark.asyncio
@@ -151,8 +172,13 @@ async def test_lifespan_initialized_database_and_storage_become_ready(tmp_path):
     from image_agent.server.database import Database
     from image_agent.server.db_models import Base
     from image_agent.server.settings import ServerSettings
-    settings = ServerSettings(f"sqlite+aiosqlite:///{tmp_path / 'ready.db'}", "server-token",
-                              Fernet.generate_key().decode(), tmp_path / "data")
+
+    settings = ServerSettings(
+        f"sqlite+aiosqlite:///{tmp_path / 'ready.db'}",
+        "server-token",
+        Fernet.generate_key().decode(),
+        tmp_path / "data",
+    )
     database = Database(settings.database_url)
     async with database.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -166,9 +192,10 @@ async def test_lifespan_initialized_database_and_storage_become_ready(tmp_path):
     assert client.get("/health/ready").status_code == 503
 
 
-
 @pytest.mark.asyncio
-async def test_failed_startup_rejects_submissions_even_if_database_reconnects(tmp_path, monkeypatch):
+async def test_failed_startup_rejects_submissions_even_if_database_reconnects(
+    tmp_path, monkeypatch
+):
     from cryptography.fernet import Fernet
     from fastapi.testclient import TestClient
 
@@ -176,8 +203,13 @@ async def test_failed_startup_rejects_submissions_even_if_database_reconnects(tm
     from image_agent.server.database import Database
     from image_agent.server.db_models import Base
     from image_agent.server.settings import ServerError, ServerSettings
-    settings = ServerSettings(f"sqlite+aiosqlite:///{tmp_path / 'reconnect.db'}", "server-token",
-                              Fernet.generate_key().decode(), tmp_path / "data")
+
+    settings = ServerSettings(
+        f"sqlite+aiosqlite:///{tmp_path / 'reconnect.db'}",
+        "server-token",
+        Fernet.generate_key().decode(),
+        tmp_path / "data",
+    )
     db = Database(settings.database_url)
     async with db.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

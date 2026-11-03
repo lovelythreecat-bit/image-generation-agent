@@ -494,7 +494,9 @@ class ProductLongImageWorkflow:
 
             segment.update(status="succeeded", error_info=None)
             segment["delivery"] = BestAvailableDelivery(
-                mode="direct", candidate_id=candidate_id, sha256=ref["sha256"],
+                mode="direct",
+                candidate_id=candidate_id,
+                sha256=ref["sha256"],
                 stop_reason="generation_completed",
             ).model_dump(mode="json")
             self.advance(state)
@@ -611,11 +613,17 @@ class ProductLongImageWorkflow:
         nodes = self.nodes
         asset = nodes.asset(state)
         runtime = self.runtime(state)
-        runtime['resume_phase'] = 'long_compose'
-        await compute(partial(
-            compose_best_sections, asset, nodes.target(state), runtime, nodes.store,
-            nodes.request.long_image.width,
-        ))
-        runtime.pop('resume_phase', None)
+        runtime["resume_phase"] = "long_compose"
+        await compute(
+            partial(
+                compose_best_sections,
+                asset,
+                nodes.target(state),
+                runtime,
+                nodes.store,
+                nodes.request.long_image.width,
+            )
+        )
+        runtime.pop("resume_phase", None)
         nodes.update_asset(state, asset)
-        state['phase'] = 'finish_asset'
+        state["phase"] = "finish_asset"

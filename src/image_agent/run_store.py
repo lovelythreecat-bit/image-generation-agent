@@ -98,7 +98,14 @@ def config_fingerprint(config):
             "request_timeout_seconds",
             "model_concurrency",
             "model_completion_attempts",
+            # Runtime thinking policy can change while resuming an existing run.
+            "enable_thinking",
             "services",
+            "cache_enabled",
+            "cache_directory",
+            "cache_max_bytes",
+            "cache_ttl_seconds",
+            "jpeg_cache_max_bytes",
         },
     )
     payload["services"] = {

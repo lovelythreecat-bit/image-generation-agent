@@ -3,7 +3,8 @@
 import asyncio
 import ipaddress
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -15,6 +16,17 @@ from .execution import reserve_post
 RETRY_STATUSES = {429, 502, 503, 504}
 RETRY_EXCEPTIONS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout)
 MAX_IMAGE_DOWNLOAD_BYTES = 32 * 1024 * 1024
+_single_image_post = ContextVar("single_image_post", default=False)
+
+
+@contextmanager
+def single_image_post():
+    """ImageGenerator owns the three-attempt limit, including response validation."""
+    token = _single_image_post.set(True)
+    try:
+        yield
+    finally:
+        _single_image_post.reset(token)
 
 
 def _validate_image_url(url):
@@ -150,7 +162,8 @@ class HttpTransport:
         headers = {}
         if key:
             headers["Authorization"] = "Bearer " + key
-        for attempt in range(3):
+        attempts = 1 if _single_image_post.get() else 3
+        for attempt in range(attempts):
             call_kind = reserve_post()
             try:
                 response = await self.client.post(
@@ -160,13 +173,13 @@ class HttpTransport:
                     timeout=self.config.request_timeout_seconds,
                 )
             except RETRY_EXCEPTIONS:
-                if call_kind == "image":
+                if call_kind == "image" or _single_image_post.get():
                     raise ProviderError(
                         "generation response uncertain after submission",
                         code="generation_uncertain",
                         kind="transport",
                     ) from None
-                if attempt == 2:
+                if attempt == attempts - 1:
                     raise ProviderError(
                         "provider connection or timeout exhausted", kind="transport"
                     ) from None
@@ -181,7 +194,7 @@ class HttpTransport:
                         return data
                     except ValueError:
                         raise ProviderError("provider returned invalid JSON object") from None
-                if response.status_code not in RETRY_STATUSES or attempt == 2:
+                if response.status_code not in RETRY_STATUSES or attempt == attempts - 1:
                     message = f"provider HTTP {response.status_code}"
                     try:
                         body = response.json()

@@ -5,6 +5,7 @@ import pytest
 from image_agent.config import AgentConfig
 from image_agent.errors import ProviderError
 from image_agent.models import GenerationReference
+from tests.test_images import picture
 
 
 @pytest.mark.parametrize(
@@ -72,23 +73,20 @@ async def test_payload_order_and_capacity():
     class Transport:
         async def post_json(self, path, payload):
             calls.append((path, payload))
-            return {"data": [{"b64_json": base64.b64encode(b"image").decode()}]}
+            return {"data": [{"b64_json": base64.b64encode(picture((32, 32))).decode()}]}
 
     gen = ImageGenerator(Transport(), AgentConfig(), encoder=lambda data, limit: data)
     refs = tuple(
         GenerationReference(material_id=f"m{i}", data=str(i).encode(), role="identity")
         for i in range(4)
     )
-    assert (
-        await gen.generate(
-            prompt="hello",
-            model="openai/gpt-image-2",
-            size="4K",
-            aspect_ratio="3:4",
-            references=refs,
-        )
-        == b"image"
-    )
+    assert await gen.generate(
+        prompt="hello",
+        model="openai/gpt-image-2",
+        size="4K",
+        aspect_ratio="3:4",
+        references=refs,
+    ) == picture((32, 32))
     path, p = calls[0]
     assert path == "/images" and p["quality"] == "high" and p["n"] == 1
     assert [x["image_url"]["url"].split(",")[1] for x in p["input_references"]] == [

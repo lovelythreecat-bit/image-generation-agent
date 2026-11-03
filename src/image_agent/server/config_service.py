@@ -18,7 +18,7 @@ from .schemas import (
     ServiceCreate,
     ServicePatch,
 )
-from .settings import ServerError
+from .settings import DEPLOYMENT_FIELDS, ServerError
 
 
 def invalid():
@@ -235,7 +235,11 @@ class ConfigService:
         return {
             **timestamps(row),
             "name": row.name,
-            "parameters": row.parameters,
+            "parameters": {
+                name: value
+                for name, value in row.parameters.items()
+                if name not in DEPLOYMENT_FIELDS
+            },
             "image_models": {
                 route.route_name: route.model_config_id
                 for route in routes
@@ -393,7 +397,16 @@ class ConfigService:
             if not service.enabled:
                 raise conflict()
             services[service_id] = service
-        mapping = {**agent.parameters, "services": {}, "image_models": {}, "stages": {}}
+        mapping = {
+            **{
+                name: value
+                for name, value in agent.parameters.items()
+                if name not in DEPLOYMENT_FIELDS
+            },
+            "services": {},
+            "image_models": {},
+            "stages": {},
+        }
         for service_id, service in services.items():
             mapping["services"][service_id] = {
                 key: getattr(service, key)
@@ -432,7 +445,11 @@ class ConfigService:
         try:
             config = AgentConfig.from_mapping(mapping)
             config.validate_credentials()
-            runtime = {field: getattr(config, field) for field in AgentParameters.model_fields}
+            runtime = {
+                field: getattr(config, field)
+                for field in AgentParameters.model_fields
+                if field not in DEPLOYMENT_FIELDS
+            }
             if not config.services:
                 key = config.openrouter_api_key.get_secret_value()
                 services = {
@@ -467,7 +484,8 @@ class ConfigService:
                     key: route.model_dump() for key, route in config.image_models.items()
                 }
                 stages = {
-                    key: route.model_dump() for key, route in config.stages.items()
+                    key: route.model_dump()
+                    for key, route in config.stages.items()
                     if key != "validate_evidence"
                 }
             # Validate name and runtime before making any database changes.

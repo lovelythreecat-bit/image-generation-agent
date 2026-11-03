@@ -141,18 +141,19 @@ def test_verified_appearance_and_physical_product_print_remain_required(request_
         ("visible_appearance", "promotional_text"),
     ],
 )
-def test_unverified_required_appearance_needs_evidence_before_generation(
+def test_unverified_annotations_do_not_block_original_material_selection(
     request_data, verifiability, source_type
 ):
     from image_agent.models import MaterialAnalysis
 
     request = CreationRequest(**request_data)
-    draft = resolve_selection(
-        request, MaterialAnalysis(**fact_data(verifiability=verifiability, source_type=source_type))
-    )
+    analysis = MaterialAnalysis(**fact_data(verifiability=verifiability, source_type=source_type))
+    draft = resolve_selection(request, analysis)
     result = finalize_selection(draft)
-    assert result.status == "needs_input"
-    assert any(i.code == "missing_evidence" and "performance" in i.fact_ids for i in result.issues)
+    assert result.status == "ready"
+    assert result.selection.subject_ids == ["s1"]
+    assert analysis.facts[-1].verifiability == verifiability
+    assert analysis.facts[-1].evidence[0].source_type == source_type
 
 
 def report_for(plan, *, subject_score=90, visual_quality=90):

@@ -479,18 +479,25 @@ async def test_explicit_wrong_product_is_not_pardoned_by_score_band_review(reque
         request_data, scores={"main": [{"identity": 82, "same": False}]}
     )
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
-    assert result.status == "quality_failed" and result.assets[0].quality.critical_failed_checks
+    assert result.status == "succeeded"
+    assert result.assets[0].delivery.mode == "best_available"
+    assert not result.assets[0].quality.passed
+    assert result.assets[0].quality.critical_failed_checks
+    assert result.assets[0].candidates[0]["status"] == "quality_failed"
     assert "review" not in vision.calls
 
 
-async def test_unaudited_candidate_blob_keeps_error_status(request_data):
+async def test_unaudited_candidate_delivery_preserves_candidate_error(request_data):
     request, deps, _, _ = setup(
         request_data, scores={"main": [ProviderError("audit unavailable", kind="transport")]}
     )
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
     bundle = result_to_bundle(result)
-    assert bundle.blobs and bundle.dto.assets[0].status == "audit_error"
-    assert bundle.dto.assets[0].quality is None and bundle.dto.assets[0].error_info
+    assert bundle.blobs and bundle.dto.assets[0].status == "succeeded"
+    assert bundle.dto.assets[0].quality is None
+    assert bundle.dto.assets[0].delivery.mode == "best_available"
+    assert result.assets[0].candidates[0]["status"] == "audit_error"
+    assert result.assets[0].candidates[0]["error_info"]
 
 
 def test_historical_quality_does_not_claim_new_critical_assessment():
@@ -507,10 +514,12 @@ def test_historical_quality_does_not_claim_new_critical_assessment():
 async def test_subjective_candidate_is_delivered_as_explicit_warning_blob(request_data):
     request, deps, _, _ = setup(request_data, scores={"main": [{"visual_quality": 20}]})
     result = await run_pipeline(request, AgentConfig(), dependencies=deps)
-    assert result.status == "quality_failed" and not result.assets[0].quality.passed
+    assert result.status == "succeeded" and not result.assets[0].quality.passed
     assert result.warnings
     bundle = result_to_bundle(result)
-    assert bundle.blobs and bundle.dto.assets[0].status == "quality_failed"
+    assert bundle.blobs and bundle.dto.assets[0].status == "succeeded"
+    assert bundle.dto.assets[0].delivery.mode == "best_available"
+    assert result.assets[0].candidates[0]["status"] == "quality_failed"
     assert bundle.dto.assets[0].blob_id == result.assets[0].asset_id
 
 

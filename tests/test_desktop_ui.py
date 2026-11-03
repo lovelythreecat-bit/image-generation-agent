@@ -63,12 +63,20 @@ def test_failed_analysis_explains_reason_instead_of_only_failed_status(app, tmp_
     fill(app, tmp_path)
     for field in app.key_fields.values():
         field.set("test-key")
-    failed = MaterialAnalysis(**(analysis_data() | {
-        "status": "failed",
-        "error_info": ErrorInfo(code="provider_protocol", kind="protocol",
-                                message="vision response violates JSON schema: unknown fact reference",
-                                stage="analyze_materials"),
-    }))
+    failed = MaterialAnalysis(
+        **(
+            analysis_data()
+            | {
+                "status": "failed",
+                "error_info": ErrorInfo(
+                    code="provider_protocol",
+                    kind="protocol",
+                    message="vision response violates JSON schema: unknown fact reference",
+                    stage="analyze_materials",
+                ),
+            }
+        )
+    )
 
     async def analyze(*args, **kwargs):
         return failed
@@ -299,8 +307,9 @@ def test_failed_result_without_assets_displays_reason_in_main_view(app):
     failed = result()
     failed.assets = []
     failed.status = "failed"
-    failed.error_info = ErrorInfo(code="provider_protocol", kind="protocol",
-                                  message="plan_product_long_image: invalid JSON")
+    failed.error_info = ErrorInfo(
+        code="provider_protocol", kind="protocol", message="plan_product_long_image: invalid JSON"
+    )
     app.show_result(failed)
     assert "长图策划" in app.status.get()
     assert "返回格式" in app.preview.cget("text")

@@ -63,9 +63,7 @@ async def test_long_product_continues_with_disputed_materials(supplied):
     if snapshot:
         snapshot.fingerprint = long_discovery_fingerprint(request, materials)
         snapshot.materials[0].sha256 = materials[0].sha256
-    product = await prepare_long_product(
-        request, materials, analysis=snapshot, vision=vision
-    )
+    product = await prepare_long_product(request, materials, analysis=snapshot, vision=vision)
     assert product.status == "ready"
     assert product.context.selection.subject_ids == ["s1"]
     assert product.context.input_check is None
@@ -112,18 +110,22 @@ async def test_disputed_long_snapshot_can_still_complete_visual_planning():
         request, materials, analysis=None, vision=FakeVision(discovery=disputed_analysis())
     )
     ready = product_plan(request, materials, product)
-    transport = Transport([
-        {
-            "status": "needs_input",
-            "issues": [{
-                "issue_id": "style",
-                "code": "missing_style",
-                "field": "style_hint",
-                "message": "Choose style",
-            }],
-        },
-        {"status": "ready", "plan": ready.model_dump(mode="json")},
-    ])
+    transport = Transport(
+        [
+            {
+                "status": "needs_input",
+                "issues": [
+                    {
+                        "issue_id": "style",
+                        "code": "missing_style",
+                        "field": "style_hint",
+                        "message": "Choose style",
+                    }
+                ],
+            },
+            {"status": "ready", "plan": ready.model_dump(mode="json")},
+        ]
+    )
     result = await LongImageVisionClient(transport, AgentConfig()).plan(
         request, materials, collect_text_requirements(request), analysis=product.analysis
     )

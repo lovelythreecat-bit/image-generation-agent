@@ -105,6 +105,47 @@ async def prepare_analysis(request, config, dependencies, *, loaded_materials=No
     materials = (
         loaded_materials if loaded_materials is not None else await _load(request, dependencies)
     )
+    if not isinstance(dependencies.vision, VisionClient):
+        return await _prepare_analysis(request, config, dependencies, loaded_materials=materials)
+    fingerprint = analysis_fingerprint(request, materials)
+
+    async def analyze():
+        prepared = await _prepare_analysis(
+            request, config, dependencies, loaded_materials=materials
+        )
+        return prepared.analysis
+
+    def validate(analysis):
+        if analysis.fingerprint != fingerprint:
+            raise ValueError("cached analysis fingerprint mismatch")
+        if analysis.status != "failed" and (
+            [(m.material_id, m.sha256) for m in analysis.materials]
+            != [(m.material_id, m.sha256) for m in materials]
+        ):
+            raise ValueError("cached analysis materials mismatch")
+        return analysis
+
+    analysis = await dependencies.vision.cache.run(
+        "analyze_materials",
+        {
+            "fingerprint": fingerprint,
+            "materials": materials,
+            "user_input": creative_input(request),
+            "selection": request.selection,
+        },
+        analyze,
+        schema=MaterialAnalysis,
+        validate=validate,
+    )
+    return PreparedAnalysis(materials=materials, analysis=analysis)
+
+
+async def _prepare_analysis(request, config, dependencies, *, loaded_materials=None):
+    if request.selection.mode != "auto":
+        raise AgentError("analyze_materials only accepts auto selection")
+    materials = (
+        loaded_materials if loaded_materials is not None else await _load(request, dependencies)
+    )
     fingerprint = analysis_fingerprint(request, materials)
     try:
         if len(materials) > config.vision_image_limit:

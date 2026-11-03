@@ -241,7 +241,9 @@ async def test_http_upload_analyze_create_download_restart(tmp_path, monkeypatch
                 )
                 for path, content in calls
             )
-            assert len(calls) == 3, "Idempotent requests or reuse must not duplicate provider calls"
+            assert len(calls) == 2, "Idempotent requests or reuse must not duplicate provider calls"
+            assert sum(path.endswith("/chat/completions") for path, _ in calls) == 1
+            assert sum(path.endswith("/images") for path, _ in calls) == 1
             public_json = json.dumps(result.json())
             assert "offline-image-private-key" not in public_json
             assert "offline-vision-private-key" not in public_json
@@ -255,4 +257,4 @@ async def test_http_upload_analyze_create_download_restart(tmp_path, monkeypatch
             persisted = await client.get(f"/api/v1/tasks/{task_id}/result")
             assert persisted.status_code == 200 and persisted.json() == result.json()
             assert (await client.get(f"/api/v1/agent-configs/{agent['id']}")).status_code == 200
-            assert len(calls) == 3, "Restart must not rerun completed paid generations"
+            assert len(calls) == 2, "Restart must not rerun completed paid generations"

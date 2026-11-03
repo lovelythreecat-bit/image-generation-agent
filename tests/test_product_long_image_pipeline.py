@@ -140,7 +140,7 @@ async def test_failed_text_audit_delivers_failed_full_candidate_and_accepts_only
     )
     asset = result.assets[0]
     assert asset.status == "succeeded" and asset.image and asset.delivery
-    assert asset.candidates[-1]['status'] == 'quality_failed'
+    assert asset.candidates[-1]["status"] == "quality_failed"
     assert len(gen.calls) == 6
     with pytest.raises(AgentError, match="final candidate"):
         await accept_candidate(

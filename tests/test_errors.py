@@ -22,10 +22,12 @@ def test_published_error_contract_accepts_recorded_stage():
 
     from image_agent.errors import ProviderError
 
-    info = make_error_info(ProviderError("provider HTTP 401", kind="http", status_code=401),
-                           stage="long_plan")
-    schema = json.loads((Path(__file__).resolve().parents[1] / "schema/error-v1.json").read_text(
-        encoding="utf-8"))["$defs"]["ErrorInfo"]
+    info = make_error_info(
+        ProviderError("provider HTTP 401", kind="http", status_code=401), stage="long_plan"
+    )
+    schema = json.loads(
+        (Path(__file__).resolve().parents[1] / "schema/error-v1.json").read_text(encoding="utf-8")
+    )["$defs"]["ErrorInfo"]
     assert info.model_dump().keys() <= schema["properties"].keys()
     assert "stage" not in schema["required"]
 
